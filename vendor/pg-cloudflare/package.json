@@ -1,0 +1,14 @@
+{
+  "name": "pg-cloudflare",
+  "version": "1.4.0",
+  "description": "Stub for Cloudflare Workers bundling — real TCP sockets not required in MOCK mode",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./index.js",
+      "require": "./index.js",
+      "default": "./index.js"
+    }
+  }
+}

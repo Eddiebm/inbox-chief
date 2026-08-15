@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "inbox-chief",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-06-05",
+  "compatibility_flags": ["nodejs_compat"],
+  "minify": true,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "vars": {
+    "MOCK_INTEGRATIONS": "true",
+    "NEXT_PUBLIC_PRODUCT_NAME": "Inbox Chief",
+    "NEXT_PUBLIC_PRODUCT_TAGLINE": "Your secure AI-powered personal digital assistant.",
+    "OPEN_NEXT_WORKER": "1"
+  }
+}

@@ -1,0 +1,344 @@
+import { openingPrompt, isUnrecognizedCaller } from "@/lib/call-in/assistant";
+import { recordVapiEndOfCallCost } from "@/lib/call-in/call-cost";
+import { resolveSnapshotForCaller } from "@/lib/call-in/identity";
+import {
+  buildCallInAssistantPayload,
+  handleCallInTool,
+  isForbiddenSendTool,
+  neverSendSpoken,
+} from "@/lib/call-in/vapi-tools";
+import { resolveCallInVoiceForUser } from "@/lib/call-in/voice-preference";
+import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
+import { product } from "@/lib/product";
+import {
+  consumeConnectedTip,
+  getProvisioningStatusForPhone,
+} from "@/lib/provisioning";
+
+export type VapiToolCall = {
+  id: string;
+  name?: string;
+  function?: { name?: string; arguments?: Record<string, unknown> | string };
+  arguments?: Record<string, unknown> | string;
+  parameters?: Record<string, unknown> | string;
+};
+
+export type VapiWebhookMessage = {
+  type?: string;
+  call?: {
+    id?: string;
+    /** Only `number` is used for identity. Ignore `name` / CNAM for speech. */
+    customer?: { number?: string; name?: string };
+    phoneNumber?: { number?: string };
+    cost?: number;
+    durationSeconds?: number;
+    endedReason?: string;
+  };
+  toolCallList?: VapiToolCall[];
+  toolWithToolCallList?: Array<{
+    toolCall?: VapiToolCall;
+    function?: { name?: string; arguments?: Record<string, unknown> | string };
+  }>;
+  artifact?: { transcript?: string };
+  summary?: string;
+  endedReason?: string;
+  cost?: number;
+  durationSeconds?: number;
+  durationMs?: number;
+  costBreakdown?: Record<string, unknown>;
+  startedAt?: string;
+  endedAt?: string;
+  status?: string;
+};
+
+function asArgs(
+  value: Record<string, unknown> | string | undefined,
+): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return value;
+}
+
+export function parseToolCall(tc: VapiToolCall): {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+} {
+  const name = tc.name ?? tc.function?.name ?? "unknown";
+  const args = asArgs(tc.arguments ?? tc.parameters ?? tc.function?.arguments);
+  return { id: tc.id, name, args };
+}
+
+export function extractCallerNumber(message: VapiWebhookMessage): string | null {
+  const call = message.call;
+  const root = message as {
+    customer?: { number?: string };
+    phoneNumber?: { number?: string };
+    from?: string;
+  };
+  const candidates = [
+    call?.customer?.number,
+    call?.phoneNumber?.number,
+    root.customer?.number,
+    root.phoneNumber?.number,
+    root.from,
+  ];
+  for (const c of candidates) {
+    if (typeof c === "string" && c.trim()) return c.trim();
+  }
+  return null;
+}
+
+/** Append minute warning after the current email — never cut speech mid-message. */
+export function appendMinuteWarning(spoken: string, warning: string | null | undefined): string {
+  const w = warning?.trim();
+  if (!w) return spoken;
+  if (spoken.includes(w)) return spoken;
+  return `${spoken} ${w}`;
+}
+
+export type VapiWebhookHandleResult =
+  | { results: Array<{ toolCallId: string; result: string }> }
+  | {
+      /** Dynamic assistant override for assistant-request (unmatched opening, etc.) */
+      assistant?: Record<string, unknown>;
+      ok?: true;
+      eventType?: string;
+      callId?: string | null;
+      note?: string;
+      costRecorded?: boolean;
+      costUsd?: number | null;
+    };
+
+/**
+ * Opening speech plus soft-cap minute warning at 80% / included limit.
+ * Does not cut off the call — overage is metered.
+ */
+async function openingWithUsageWarning(
+  snapshot: Awaited<
+    ReturnType<typeof resolveSnapshotForCaller>
+  >["snapshot"],
+): Promise<string> {
+  const base = openingPrompt(snapshot);
+  if (
+    isUnrecognizedCaller(snapshot) ||
+    snapshot.organizationId === "demo_org" ||
+    snapshot.organizationId === "unrecognized"
+  ) {
+    return base;
+  }
+  try {
+    const usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
+    if (usage.warningLevel === "none" || !usage.spokenWarning) return base;
+    return `${base} ${usage.spokenWarning}`;
+  } catch {
+    return base;
+  }
+}
+
+/**
+ * Handle VAPI server-url / webhook payloads for Inbox Chief call-in.
+ * Tool results are speakable status strings. Never sends email.
+ */
+export async function handleVapiCallInWebhook(
+  body: unknown,
+): Promise<VapiWebhookHandleResult> {
+  const root = (body && typeof body === "object" ? body : {}) as {
+    message?: VapiWebhookMessage;
+  };
+  const message = root.message ?? (body as VapiWebhookMessage);
+  const type = message?.type ?? "unknown";
+  const callId = message?.call?.id ?? null;
+  const callerPhone = extractCallerNumber(message);
+
+  if (type === "tool-calls") {
+    const resolved = await resolveSnapshotForCaller(callerPhone);
+    if (resolved.matched && resolved.userId) {
+      try {
+        const voice = await resolveCallInVoiceForUser({
+          userId: resolved.userId,
+          organizationId: resolved.snapshot.organizationId,
+        });
+        resolved.snapshot.voiceTier = voice.effective;
+      } catch {
+        resolved.snapshot.voiceTier = "standard";
+      }
+    }
+
+    let usageWarning = "";
+    if (
+      resolved.matched &&
+      resolved.snapshot.organizationId !== "demo_org" &&
+      resolved.snapshot.organizationId !== "unrecognized"
+    ) {
+      try {
+        const usage = await loadCallMinuteUsageForOrg(resolved.snapshot.organizationId);
+        if (usage.warningLevel !== "none" && usage.spokenWarning) {
+          usageWarning = usage.spokenWarning;
+        }
+      } catch {
+        /* keep reading — never hang up for a usage lookup failure */
+      }
+    }
+
+    const toolCallList =
+      message.toolCallList ??
+      (message.toolWithToolCallList ?? [])
+        .map((row) => row.toolCall)
+        .filter((tc): tc is VapiToolCall => Boolean(tc?.id));
+
+    const results: Array<{ toolCallId: string; result: string }> = [];
+
+    for (const tc of toolCallList) {
+      const parsed = parseToolCall(tc);
+      if (isForbiddenSendTool(parsed.name)) {
+        results.push({
+          toolCallId: parsed.id,
+          result: neverSendSpoken(),
+        });
+        continue;
+      }
+      try {
+        const handled = await handleCallInTool({
+          name: parsed.name,
+          args: parsed.args,
+          snapshot: resolved.snapshot,
+          requestedById: resolved.userId,
+          callerPhone,
+        });
+        // Invariant: emailSent is always false on this path
+        if (handled.emailSent !== false) {
+          results.push({
+            toolCallId: parsed.id,
+            result: neverSendSpoken(),
+          });
+          continue;
+        }
+        results.push({
+          toolCallId: parsed.id,
+          result: appendMinuteWarning(
+            handled.spoken.replace(/\n/g, " "),
+            usageWarning,
+          ),
+        });
+      } catch {
+        results.push({
+          toolCallId: parsed.id,
+          result:
+            "I hit a temporary error. Ask for a briefing or connection status.",
+        });
+      }
+    }
+
+    return { results };
+  }
+
+  if (type === "assistant-request") {
+    // Identity uses customer.number only — never customer.name / CNAM for speech.
+    const resolved = await resolveSnapshotForCaller(callerPhone);
+    let spoken = await openingWithUsageWarning(resolved.snapshot);
+    const provisioning = await getProvisioningStatusForPhone(callerPhone);
+    if (provisioning?.status === "needs_google_test_user") {
+      spoken =
+        "Your account and phone are saved. Your operator still needs to enable this Gmail address. Then open the link we sent or use your short code.";
+    } else if (provisioning?.status === "needs_google_consent") {
+      spoken =
+        "Your mailbox isn't connected yet. Open the link we sent, or ask your admin. Your phone is already saved.";
+    } else if (
+      provisioning?.status === "connected" &&
+      resolved.userId &&
+      (await consumeConnectedTip(resolved.userId))
+    ) {
+      spoken = `You're connected. Say read my emails. ${spoken}`;
+    }
+    const baseUrl =
+      process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
+      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      "https://inbox-chief-kappa.vercel.app";
+
+    let voiceTier: "standard" | "premium" = "standard";
+    if (resolved.matched && resolved.userId) {
+      try {
+        const voice = await resolveCallInVoiceForUser({
+          userId: resolved.userId,
+          organizationId: resolved.snapshot.organizationId,
+        });
+        voiceTier = voice.effective;
+        if (voice.spokenTip) {
+          spoken = `${spoken} ${voice.spokenTip}`;
+        }
+      } catch (err) {
+        console.warn("[call-in] voice resolve failed; using standard", err);
+      }
+    }
+
+    const payload = buildCallInAssistantPayload(baseUrl, {
+      voiceTier,
+      firstMessage: spoken,
+    });
+    if (isUnrecognizedCaller(resolved.snapshot)) {
+      payload.name = `${product.name} — Unrecognized caller`;
+    }
+    return {
+      assistant: payload,
+      ok: true,
+      eventType: type,
+      callId,
+      note: spoken,
+    };
+  }
+
+  if (type === "conversation-update") {
+    const resolved = await resolveSnapshotForCaller(callerPhone);
+    return {
+      ok: true,
+      eventType: type,
+      callId,
+      note: await openingWithUsageWarning(resolved.snapshot),
+    };
+  }
+
+  if (type === "end-of-call-report") {
+    const costResult = await recordVapiEndOfCallCost(body);
+    return {
+      ok: true,
+      eventType: type,
+      callId,
+      note: "Call ended. No email was sent from this session.",
+      costRecorded: costResult.recorded,
+      costUsd: costResult.costUsd ?? null,
+    };
+  }
+
+  if (type === "status-update") {
+    return {
+      ok: true,
+      eventType: type,
+      callId,
+    };
+  }
+
+  return { ok: true, eventType: type, callId };
+}
+
+export function verifyVapiWebhookSecret(
+  headers: Headers,
+): { ok: true } | { ok: false; status: number; error: string } {
+  const expected = process.env.VAPI_WEBHOOK_SECRET?.trim();
+  if (!expected) return { ok: true };
+  const provided =
+    headers.get("x-vapi-secret") ??
+    headers.get("x-webhook-secret") ??
+    "";
+  if (provided === expected) return { ok: true };
+  return { ok: false, status: 401, error: "Invalid webhook secret" };
+}

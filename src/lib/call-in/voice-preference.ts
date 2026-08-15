@@ -4,6 +4,7 @@
  */
 
 import type { CallUsageWarningLevel } from "@/lib/billing/call-usage";
+import { resolveEntitlements } from "@/lib/billing/entitlements";
 import { getDefaultPlan } from "@/lib/plans";
 import {
   dbVoiceTier,
@@ -192,7 +193,15 @@ async function loadOrgPlanId(organizationId: string): Promise<string> {
       orderBy: { updatedAt: "desc" },
       include: { plan: true },
     });
-    return sub?.plan?.key ?? getDefaultPlan().id;
+    // Gate on the *entitled* plan so a canceled/lapsed Pro loses premium voice.
+    const entitlements = resolveEntitlements({
+      planKey: sub?.plan?.key ?? getDefaultPlan().id,
+      status: sub?.status ?? "TRIALING",
+      trialEndsAt: sub?.trialEndsAt ?? null,
+      currentPeriodEnd: sub?.currentPeriodEnd ?? null,
+      cancelAtPeriodEnd: sub?.cancelAtPeriodEnd ?? false,
+    });
+    return entitlements.effectivePlanId;
   } catch {
     return getDefaultPlan().id;
   }

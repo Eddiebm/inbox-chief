@@ -42,6 +42,21 @@ import {
   voiceTierInfo,
   type CallInVoiceTierId,
 } from "@/lib/call-in/voice-tiers";
+import {
+  DEFAULT_CALL_IN_SPEECH_RATE,
+  adjustSpeechRate,
+  applySpeechRateToVoice,
+  detectSpeechRateCommand,
+  parseSpeechRateCommandArg,
+  speakSpeechRateChange,
+  type CallInSpeechRate,
+  type SpeechRateCommand,
+} from "@/lib/call-in/speech-rate";
+import {
+  getCallInSpeechRateForUser,
+  setCallInSpeechRateForUser,
+} from "@/lib/call-in/voice-preference";
+import { patchLiveCallSpeechRate } from "@/lib/call-in/vapi-live-call";
 import { product } from "@/lib/product";
 import { queueAttachmentDelivery } from "@/lib/attachment-deliveries";
 import {
@@ -88,6 +103,7 @@ export const VAPI_CALL_IN_TOOL_NAMES = [
   "confirm_email_send",
   "get_calendar",
   "save_contact_nickname",
+  "set_speech_speed",
 ] as const;
 
 export type VapiCallInToolName = (typeof VAPI_CALL_IN_TOOL_NAMES)[number];
@@ -112,6 +128,7 @@ const TOOL_TO_QUESTION: Record<
     | "confirm_email_send"
     | "get_calendar"
     | "save_contact_nickname"
+    | "set_speech_speed"
   >,
   string
 > = {
@@ -149,10 +166,30 @@ export type VapiToolHandlerResult = {
     | "compose_email"
     | "send_email"
     | "calendar"
-    | "contact";
+    | "contact"
+    | "speech_rate"
+    | "minute_cap";
   toolName: string;
   emailSent: boolean;
 };
+
+/**
+ * Hard minute cap: when the org has used all included minutes for the period,
+ * productive/billable call-in tools are denied. Only cheap account/setup tools
+ * that don't read mail content stay available so a caller can still understand
+ * their state or finish signing up. The assistant speaks the cap message
+ * verbatim (see buildSpokenCapReached) and does not invent a workaround.
+ */
+const CAP_EXEMPT_TOOLS = new Set<string>([
+  "provision_signup",
+  "check_provision_status",
+  "get_connection_status",
+  // Changing reading speed is cheap and must work even at the minute cap.
+  "set_speech_speed",
+]);
+
+/** Passed down from the webhook once org usage is loaded. */
+export type CallInHardCap = { reached: boolean; spoken: string } | null;
 
 /** Explicit index from the model, or null when it only said next/first. */
 export function parseStartIndexArg(
@@ -909,6 +946,47 @@ export function readIntentFromQuestion(
   return null;
 }
 
+/**
+ * Change the reading speed for a call and remember it for next time.
+ * Works in any mailbox state so a patron is never stuck listening too fast or
+ * too slow. Persists the new rate and attempts a best-effort live update.
+ */
+async function handleSetSpeechSpeed(
+  input: CallInToolInput,
+  command: SpeechRateCommand,
+  toolName: string,
+): Promise<VapiToolHandlerResult> {
+  const current = await getCallInSpeechRateForUser(input.requestedById);
+  const next = adjustSpeechRate(current, command);
+  await setCallInSpeechRateForUser({ userId: input.requestedById, rate: next });
+  await patchLiveCallSpeechRate({
+    callId: input.callId,
+    tier: input.snapshot.voiceTier ?? "standard",
+    rate: next,
+  });
+  return {
+    spoken: speakSpeechRateChange(current, next, command),
+    intent: "speech_rate",
+    toolName,
+    emailSent: false,
+  };
+}
+
+/** Read a speech-speed command from explicit tool args (command/speed/direction). */
+function speechCommandFromArgs(
+  args: Record<string, unknown> | undefined,
+): SpeechRateCommand | null {
+  return (
+    parseSpeechRateCommandArg(args?.command) ??
+    parseSpeechRateCommandArg(args?.speed) ??
+    parseSpeechRateCommandArg(args?.direction) ??
+    parseSpeechRateCommandArg(args?.rate) ??
+    (typeof args?.question === "string"
+      ? detectSpeechRateCommand(args.question)
+      : null)
+  );
+}
+
 export async function handleCallInTool(input: {
   name: string;
   args?: Record<string, unknown>;
@@ -919,6 +997,8 @@ export async function handleCallInTool(input: {
   callInIdentityId?: string | null;
   /** Provider call id — a new call restarts at the newest message. */
   callId?: string | null;
+  /** Hard minute cap for the org this period; denies billable tools at 100%. */
+  hardCap?: CallInHardCap;
 }): Promise<VapiToolHandlerResult> {
   const name = input.name.trim();
 
@@ -929,6 +1009,22 @@ export async function handleCallInTool(input: {
       toolName: name,
       emailSent: false,
     };
+  }
+
+  // Hard cap: deny reading/composing/new billable work once minutes are used up.
+  if (input.hardCap?.reached && !CAP_EXEMPT_TOOLS.has(name)) {
+    return {
+      spoken: input.hardCap.spoken,
+      intent: "minute_cap",
+      toolName: name,
+      emailSent: false,
+    };
+  }
+
+  // Reading speed can change in any state (works even at the minute cap).
+  if (name === "set_speech_speed") {
+    const command = speechCommandFromArgs(input.args) ?? "normal";
+    return handleSetSpeechSpeed(input, command, name);
   }
 
   if (name === "provision_signup") {
@@ -1309,6 +1405,11 @@ export async function handleCallInTool(input: {
         emailSent: false,
       };
     }
+    // "faster" / "slower" / "normal speed" spoken mid-read change the pace.
+    const speedCommand = detectSpeechRateCommand(question);
+    if (speedCommand) {
+      return handleSetSpeechSpeed(input, speedCommand, name);
+    }
     // Reading requests routed here still use the cursor, so "next" advances.
     const asRead = readIntentFromQuestion(question);
     if (asRead) {
@@ -1535,6 +1636,27 @@ export function buildCallInVapiTools(serverUrl: string) {
     {
       type: "function",
       function: {
+        name: "set_speech_speed",
+        description:
+          "Change how fast Inbox Chief reads. Call this whenever the caller asks about pace: 'faster', 'speed up', 'read faster', 'too slow' → command=faster; 'slower', 'slow down', 'too fast', 'not so fast' → command=slower; 'normal speed', 'regular speed', 'reset the speed' → command=normal. It steps one level per faster/slower and saves the choice for future calls. Speak the tool result verbatim.",
+        parameters: {
+          type: "object",
+          properties: {
+            command: {
+              type: "string",
+              enum: ["faster", "slower", "normal"],
+              description:
+                "faster = one step quicker; slower = one step slower; normal = reset to normal speed.",
+            },
+          },
+          required: ["command"],
+        },
+      },
+      server: toolServer,
+    },
+    {
+      type: "function",
+      function: {
         name: "get_briefing",
         description:
           "Accessibility briefing: read Primary-inbox emails needing attention aloud one at a time (from, subject, then message/preview). Skips promotions/social/updates/forums/spam unless the caller asked for those. Do not only give a count.",
@@ -1722,6 +1844,9 @@ export function buildCallInSystemPrompt(): string {
     "Only include other tabs when the caller explicitly says read promotions, read junk, read everything, or similar. Then pass inboxScope=promotions or inboxScope=everything to read_emails. This composes with selection and count.",
     "Only use a subjects-first overview when the caller explicitly asks for an overview, a list, or what's in my inbox. Anything like read my emails, read my mail, or go through my inbox means a full read, one message at a time.",
     "When the caller asks for a briefing, what's in their inbox, read my emails, or what needs attention: call get_briefing, read_emails, or get_needs_attention.",
+    // Reading pace is patron-controlled and must not be ignored or improvised.
+    "SPEED CONTROL: if the caller says anything about pace — faster, speed up, read faster, too slow, slower, slow down, too fast, not so fast, normal speed, regular speed, or reset the speed — call set_speech_speed with command=faster, slower, or normal. Do not treat these as a new reading request and do not restart the inbox. Speak the tool's confirmation verbatim, then continue from where you were if you were mid-read.",
+    "Never change the reading speed on your own and never claim you sped up or slowed down without calling set_speech_speed. The saved speed carries to the caller's next call.",
     // Root cause of an earlier complaint: the assistant stopped after the newest message.
     "The inbox has many messages. Start with read_emails position=first. Use position=skip for next, next email, move on, or skip while content is in progress; otherwise use position=next for another email. Continue, more, and keep reading mean position=continue for the current body or attachment.",
     "Subset mapping is exact: 'first 10' means selection=newest,count=10; say the tool's confirmation '10 most recent'. 'last 10' or 'oldest 10' means selection=oldest,count=10. 'new 3' means selection=new,count=3. 'just the new ones' means selection=new with no count. 'number 4' means index=4. 'next 3' means position=next,selection=newest,count=3.",
@@ -1753,6 +1878,7 @@ export function buildCallInSystemPrompt(): string {
     "For reply to this one, call compose_email with replyToCurrent=true. For a name or nickname, let the tool resolve it. If the tool reports ambiguity, speak every candidate and ask which one; never guess.",
     "For calendar today, tomorrow, or next, call get_calendar and speak its result verbatim. If disconnected, tell them to use the optional Connect Calendar action in Settings. Never invent an event.",
     "For save this sender as Mom or call Jordan Lee Jordan, call save_contact_nickname. Never use a guessed contact.",
+    "MINUTES EXHAUSTED: if a tool result says the caller has no call minutes left (included and purchased both used up), speak that result VERBATIM and stop. Do not read mail, compose, or start any new request. Do not invent a workaround, an emergency buffer, or a way to keep going. Valid choices are: buy more minutes in the Inbox Chief dashboard, upgrade the plan, or wait for the next period.",
     "Keep language plain. If only subject/from is available, say so and still read that metadata.",
     "When an unrecognized caller says sign up, create account, or get started: ask for their Gmail address, spell it back character by character, obtain explicit confirmation, then ask for an optional preferred name. Call provision_signup only after confirmation.",
     "Caller ID is the phone by default. If caller ID is unavailable, ask them to say or enter their cell number, including area code. Never ask for a phone when the tool already has caller ID.",
@@ -1779,6 +1905,7 @@ export function buildCallInAssistantPayload(
   serverUrl: string,
   options?: {
     voiceTier?: CallInVoiceTierId;
+    speechRate?: CallInSpeechRate;
     firstMessage?: string;
   },
 ): Record<string, unknown> {
@@ -1790,19 +1917,23 @@ export function buildCallInAssistantPayload(
   }
 
   const tier = options?.voiceTier ?? "standard";
-  const voiceInfo = voiceTierInfo(tier);
+  const rate = options?.speechRate ?? DEFAULT_CALL_IN_SPEECH_RATE;
+  const voiceInfo = applySpeechRateToVoice(voiceTierInfo(tier).vapi, rate);
   const voice: Record<string, unknown> = {
-    provider: voiceInfo.vapi.provider,
-    voiceId: voiceInfo.vapi.voiceId,
+    provider: voiceInfo.provider,
+    voiceId: voiceInfo.voiceId,
   };
-  if (voiceInfo.vapi.model) {
-    voice.model = voiceInfo.vapi.model;
+  if (voiceInfo.model) {
+    voice.model = voiceInfo.model;
   }
-  if (voiceInfo.vapi.language) {
-    voice.language = voiceInfo.vapi.language;
+  if (voiceInfo.language) {
+    voice.language = voiceInfo.language;
   }
-  if (voiceInfo.vapi.experimentalControls) {
-    voice.experimentalControls = voiceInfo.vapi.experimentalControls;
+  if (voiceInfo.experimentalControls) {
+    voice.experimentalControls = voiceInfo.experimentalControls;
+  }
+  if (typeof voiceInfo.speed === "number") {
+    voice.speed = voiceInfo.speed;
   }
 
   return {

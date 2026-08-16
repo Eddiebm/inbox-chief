@@ -18,6 +18,12 @@ import {
   voiceTierInfo,
   type CallInVoiceTierId,
 } from "@/lib/call-in/voice-tiers";
+import {
+  DEFAULT_CALL_IN_SPEECH_RATE,
+  dbSpeechRate,
+  fromDbSpeechRate,
+  type CallInSpeechRate,
+} from "@/lib/call-in/speech-rate";
 
 export type ResolvedCallInVoice = {
   planId: string;
@@ -28,6 +34,8 @@ export type ResolvedCallInVoice = {
   costGuardActive: boolean;
   /** Spoken tip to prepend once (null if already spoken or not applicable). */
   spokenTip: string | null;
+  /** Saved reading speed applied to this call's voice. */
+  speechRate: CallInSpeechRate;
   voice: ReturnType<typeof voiceTierInfo>["vapi"];
 };
 
@@ -70,6 +78,7 @@ export async function resolveCallInVoiceForUser(input: {
       tipSpoken: true,
       costGuardActive: costGuardPreferStandard && preferred === "premium",
       spokenTip: null,
+      speechRate: DEFAULT_CALL_IN_SPEECH_RATE,
       voice: voiceTierInfo(effective).vapi,
     };
   }
@@ -81,6 +90,7 @@ export async function resolveCallInVoiceForUser(input: {
     where: { userId: input.userId },
     select: {
       callInVoiceTier: true,
+      callInSpeechRate: true,
       callInVoiceTipSpoken: true,
       callInCostGuardTipSpoken: true,
     },
@@ -97,6 +107,7 @@ export async function resolveCallInVoiceForUser(input: {
       },
       select: {
         callInVoiceTier: true,
+        callInSpeechRate: true,
         callInVoiceTipSpoken: true,
         callInCostGuardTipSpoken: true,
       },
@@ -104,6 +115,7 @@ export async function resolveCallInVoiceForUser(input: {
   }
 
   const preferred = fromDbVoiceTier(prefs.callInVoiceTier);
+  const speechRate = fromDbSpeechRate(prefs.callInSpeechRate);
   const effective = resolveEffectiveVoiceTier({
     planId,
     preferred,
@@ -148,6 +160,7 @@ export async function resolveCallInVoiceForUser(input: {
     tipSpoken,
     costGuardActive,
     spokenTip,
+    speechRate,
     voice: voiceTierInfo(effective).vapi,
   };
 }
@@ -214,6 +227,7 @@ export async function getCallInVoicePreferenceForUser(userId: string): Promise<{
   allowsPremium: boolean;
   costGuardActive: boolean;
   costGuardPreferStandard: boolean;
+  speechRate: CallInSpeechRate;
 } | null> {
   if (!userId || userId === "mock_user") return null;
   const { getNodePrisma } = await import("@/lib/db-node");
@@ -228,7 +242,7 @@ export async function getCallInVoicePreferenceForUser(userId: string): Promise<{
     : getDefaultPlan().id;
   const prefs = await prisma.accessibilityPreference.findUnique({
     where: { userId },
-    select: { callInVoiceTier: true },
+    select: { callInVoiceTier: true, callInSpeechRate: true },
   });
   const preferred = prefs
     ? fromDbVoiceTier(prefs.callInVoiceTier)
@@ -252,7 +266,74 @@ export async function getCallInVoicePreferenceForUser(userId: string): Promise<{
       preferred === "premium" &&
       effective === "standard",
     costGuardPreferStandard,
+    speechRate: prefs
+      ? fromDbSpeechRate(prefs.callInSpeechRate)
+      : DEFAULT_CALL_IN_SPEECH_RATE,
   };
+}
+
+/**
+ * Load only the saved reading speed. Returns the default when there is no DB,
+ * no user, or no stored preference yet.
+ */
+export async function getCallInSpeechRateForUser(
+  userId: string | null | undefined,
+): Promise<CallInSpeechRate> {
+  if (
+    !userId ||
+    userId === "mock_user" ||
+    process.env.MOCK_INTEGRATIONS === "true" ||
+    !process.env.DATABASE_URL
+  ) {
+    return DEFAULT_CALL_IN_SPEECH_RATE;
+  }
+  try {
+    const { getNodePrisma } = await import("@/lib/db-node");
+    const prisma = getNodePrisma();
+    const prefs = await prisma.accessibilityPreference.findUnique({
+      where: { userId },
+      select: { callInSpeechRate: true },
+    });
+    return fromDbSpeechRate(prefs?.callInSpeechRate);
+  } catch {
+    return DEFAULT_CALL_IN_SPEECH_RATE;
+  }
+}
+
+/**
+ * Persist the reading speed so the next call remembers it. Best-effort: a
+ * failed write must never interrupt a live call, so it returns the intended
+ * rate regardless.
+ */
+export async function setCallInSpeechRateForUser(input: {
+  userId: string | null | undefined;
+  rate: CallInSpeechRate;
+}): Promise<CallInSpeechRate> {
+  if (
+    !input.userId ||
+    input.userId === "mock_user" ||
+    process.env.MOCK_INTEGRATIONS === "true" ||
+    !process.env.DATABASE_URL
+  ) {
+    return input.rate;
+  }
+  try {
+    const { getNodePrisma } = await import("@/lib/db-node");
+    const prisma = getNodePrisma();
+    await prisma.accessibilityPreference.upsert({
+      where: { userId: input.userId },
+      create: {
+        userId: input.userId,
+        callInSpeechRate: dbSpeechRate(input.rate),
+        screenReaderOptimized: true,
+        preferVoiceOnboarding: true,
+      },
+      update: { callInSpeechRate: dbSpeechRate(input.rate) },
+    });
+  } catch {
+    /* best-effort — next call still defaults gracefully */
+  }
+  return input.rate;
 }
 
 export async function setCallInVoicePreference(input: {

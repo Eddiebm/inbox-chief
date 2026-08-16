@@ -152,6 +152,8 @@ model Organization {
   attachmentDeliveries AttachmentDelivery[]
   calendarConnections  CalendarConnection[]
   contacts             Contact[]
+  callMinuteBalance    CallMinuteBalance?
+  callMinutePurchases  CallMinutePackPurchase[]
 }
 
 model User {
@@ -599,6 +601,15 @@ enum CallInVoiceTier {
   PREMIUM
 }
 
+/// How fast Inbox Chief reads on the phone. BRISK is the default (a little
+/// faster than NORMAL); patrons can say "slower" / "normal speed" to change it.
+enum CallInSpeechRate {
+  SLOW
+  NORMAL
+  BRISK
+  FAST
+}
+
 model AccessibilityPreference {
   id                       String          @id @default(cuid())
   userId                   String          @unique
@@ -610,6 +621,8 @@ model AccessibilityPreference {
   preferVoiceOnboarding    Boolean         @default(true)
   /// Phone call-in TTS: STANDARD (Cartesia, lower cost) or PREMIUM (ElevenLabs). Plan-gated.
   callInVoiceTier          CallInVoiceTier @default(STANDARD)
+  /// Phone call-in reading speed. BRISK default; patron can change by voice or in Settings.
+  callInSpeechRate         CallInSpeechRate @default(BRISK)
   /// One-time spoken tip about Standard vs Premium already delivered on a call.
   callInVoiceTipSpoken     Boolean         @default(false)
   /// One-time tip when minutes ≥80% auto-prefers Standard to stretch the plan.
@@ -992,6 +1005,8 @@ model CallSession {
   /// Where cost came from: vapi_webhook | vapi_api
   costSource       String?
   costBreakdown    Json?
+  /// Minutes of this call drawn from prepaid purchased balance (after included).
+  purchasedMinutesDrawn Float?
 
   identity CallInIdentity? @relation(fields: [callInIdentityId], references: [id])
   turns    CallTurn[]
@@ -999,6 +1014,44 @@ model CallSession {
   @@index([organizationId, workspaceId, startedAt])
   @@index([organizationId, userId, startedAt])
   @@index([providerCallSid])
+}
+
+/**
+ * Prepaid purchased-minute wallet per organization.
+ * Purchased minutes **roll over** across billing periods until consumed.
+ * Included plan minutes are computed from CallSession durations vs the plan —
+ * they are not stored here.
+ */
+model CallMinuteBalance {
+  id                        String   @id @default(cuid())
+  organizationId            String   @unique
+  /// Prepaid minutes remaining (rollover). Drawn after included minutes.
+  purchasedMinutesRemaining Float    @default(0)
+  /// Lifetime minutes credited from packs (analytics).
+  purchasedMinutesLifetime  Float    @default(0)
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  purchases    CallMinutePackPurchase[]
+}
+
+/** Audit row for each prepaid minute-pack purchase (Stripe one-time checkout). */
+model CallMinutePackPurchase {
+  id                      String   @id @default(cuid())
+  organizationId          String
+  balanceId               String?
+  packId                  String
+  minutesCredited         Int
+  amountUsdCents          Int
+  stripeCheckoutSessionId String?  @unique
+  stripePaymentIntentId   String?
+  createdAt               DateTime @default(now())
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  balance      CallMinuteBalance? @relation(fields: [balanceId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
 }
 
 model CallTurn {

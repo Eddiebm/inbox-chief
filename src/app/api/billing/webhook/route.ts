@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import {
+  applyMinutePackPurchase,
   applySubscriptionChange,
+  normalizeMinutePackPurchase,
   normalizeStripeEvent,
+  type PrismaForMinutePackWebhook,
   type PrismaForWebhook,
   type StripeWebhookObject,
 } from "@/lib/billing/stripe-webhook";
@@ -13,6 +16,8 @@ export const runtime = "nodejs";
  *
  * Handled events:
  * - checkout.session.completed            → create/attach the subscription
+ *                                           or credit a paid minute pack
+ * - checkout.session.async_payment_succeeded → credit a delayed minute payment
  * - customer.subscription.created/updated → refresh plan, status, period, trial
  * - customer.subscription.deleted         → mark canceled (downgrade to free)
  * - invoice.payment_failed                → mark past due (grace, with warning)
@@ -45,6 +50,17 @@ export async function POST(request: Request) {
     );
 
     let obj = event.data.object as StripeWebhookObject;
+
+    const packPurchase = normalizeMinutePackPurchase(event.type, obj);
+    if (packPurchase.kind === "credit") {
+      const result = await applyMinutePackIfConfigured(packPurchase);
+      return NextResponse.json({
+        ok: true,
+        received: true,
+        type: event.type,
+        applied: result?.applied ?? false,
+      });
+    }
 
     // On checkout completion, the session lacks the subscription's status,
     // period, and trial. Retrieve the live subscription so state is accurate.
@@ -105,6 +121,15 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+}
+
+async function applyMinutePackIfConfigured(
+  purchase: ReturnType<typeof normalizeMinutePackPurchase>,
+) {
+  if (!process.env.DATABASE_URL || purchase.kind === "ignore") return null;
+  const { getNodePrisma } = await import("@/lib/db-node");
+  const prisma = getNodePrisma() as unknown as PrismaForMinutePackWebhook;
+  return applyMinutePackPurchase(prisma, purchase);
 }
 
 async function applyIfConfigured(

@@ -10,6 +10,11 @@ import {
   type CallCostTally,
   type ParsedVapiCallCost,
 } from "@/lib/call-in/call-cost-format";
+import {
+  planForUsageKey,
+  resolveBillingPeriod,
+} from "@/lib/billing/call-usage";
+import { drawPurchasedMinutesForCall } from "@/lib/billing/call-usage-server";
 
 export type {
   CallCostRow,
@@ -206,6 +211,12 @@ export async function recordVapiEndOfCallCost(
           },
           data: { lastSuccessfulCallAt: endedAt },
         });
+        await reconcilePurchasedMinutesAfterCall({
+          organizationId: identity.organizationId,
+          sessionId: updated.id,
+          durationSeconds: resolved.durationSeconds,
+          startedAt,
+        });
         return {
           recorded: true,
           sessionId: updated.id,
@@ -225,6 +236,12 @@ export async function recordVapiEndOfCallCost(
         ],
       },
       data: { lastSuccessfulCallAt: endedAt },
+    });
+    await reconcilePurchasedMinutesAfterCall({
+      organizationId: identity.organizationId,
+      sessionId: created.id,
+      durationSeconds: resolved.durationSeconds,
+      startedAt,
     });
     return {
       recorded: true,
@@ -295,4 +312,60 @@ export async function loadCallCostTallyForUser(input: {
   }
 
   return aggregateCallCostTally(rows);
+}
+
+/**
+ * After duration is stored, draw prepaid minutes for any usage past included.
+ * Failures are logged but do not undo cost recording.
+ */
+async function reconcilePurchasedMinutesAfterCall(input: {
+  organizationId: string;
+  sessionId: string;
+  durationSeconds: number | null | undefined;
+  startedAt: Date;
+}): Promise<void> {
+  const durationSeconds = input.durationSeconds;
+  if (durationSeconds == null || !Number.isFinite(durationSeconds)) return;
+
+  try {
+    const { getNodePrisma } = await import("@/lib/db-node");
+    const prisma = getNodePrisma();
+
+    const subscription = await prisma.subscription.findFirst({
+      where: { organizationId: input.organizationId },
+      orderBy: { updatedAt: "desc" },
+      include: { plan: true },
+    });
+    const plan = planForUsageKey(subscription?.plan?.key);
+    const included = plan.callLimits.includedCallMinutes ?? 90;
+    const { periodStart, periodEnd } = resolveBillingPeriod({
+      currentPeriodEnd: subscription?.currentPeriodEnd ?? null,
+    });
+
+    const prior = await prisma.callSession.aggregate({
+      where: {
+        organizationId: input.organizationId,
+        channel: "PHONE",
+        startedAt: { gte: periodStart, lt: periodEnd },
+        id: { not: input.sessionId },
+        durationSeconds: { not: null },
+      },
+      _sum: { durationSeconds: true },
+    });
+    const priorSeconds = prior._sum.durationSeconds ?? 0;
+    const periodMinutesUsedBeforeCall =
+      typeof priorSeconds === "number"
+        ? priorSeconds / 60
+        : Number(priorSeconds) / 60;
+
+    await drawPurchasedMinutesForCall({
+      organizationId: input.organizationId,
+      sessionId: input.sessionId,
+      callDurationMinutes: Math.max(0, durationSeconds) / 60,
+      periodMinutesUsedBeforeCall,
+      minutesIncluded: included,
+    });
+  } catch (err) {
+    console.warn("[call-cost] purchased-minute draw failed", err);
+  }
 }

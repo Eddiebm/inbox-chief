@@ -1,27 +1,50 @@
 /**
  * Product subscription plans — single source of truth for marketing, billing UI,
- * and call-minute soft caps.
+ * and call-minute accounting.
  *
  * Stripe remains stubbed until `STRIPE_PRICE_<PLAN_ID>` env vars are set
  * (e.g. STRIPE_PRICE_PATRON, STRIPE_PRICE_PRO). Checkout/portal APIs return
  * `stripe_not_configured` or stub sessions until then; plan keys/prices here
  * must still match what we intend to charge.
  *
- * Model: included call-in **minutes** per billing period (not unlimited).
- * Overage is metered at a clear per-minute rate — calls are not cut off mid-email;
- * patrons are warned at 80% and at the included limit.
+ * Model: included call-in **minutes** per billing period (not unlimited), plus
+ * optional **prepaid minute packs** (one-time Stripe purchases that roll over).
+ * No silent soft overage. When included + purchased balance is exhausted,
+ * call-in hard-stops until the patron buys more, upgrades, or the included
+ * allotment resets next period.
  */
 
 export type PlanPrice =
   | { kind: "monthly"; amountUsd: number; label: string }
   | { kind: "custom"; label: string };
 
-/** Soft-cap call limits — overage allowed and metered; never “unlimited”. */
+/** Call limits — included minutes per period; prepaid packs cover extra use. */
 export type PlanCallLimits = {
   /** Included phone call-in minutes per billing period. null = contact sales. */
   includedCallMinutes: number | null;
-  /** USD charged per minute after included minutes (spoken + shown). */
+  /**
+   * No silent soft overage. Always null.
+   * Extra minutes come from prepaid packs (`MINUTE_PACKS`), not metered billing.
+   */
   overagePerMinuteUsd: number | null;
+};
+
+/**
+ * Prepaid minute pack (one-time Stripe purchase). Purchased minutes **roll over**
+ * across billing periods until used — patron-friendly and simpler than expiry.
+ *
+ * Pricing targets ~$0.40–0.60/min effective vs ~$0.12–0.22/min VAPI COGS so
+ * margin holds after pack purchase.
+ */
+export type MinutePack = {
+  id: "pack_30" | "pack_60" | "pack_120";
+  minutes: number;
+  /** USD charged once for the pack. */
+  priceUsd: number;
+  label: string;
+  description: string;
+  /** Env var holding the Stripe one-time Price ID (`price_…`). */
+  stripePriceEnvKey: string;
 };
 
 export type PlanResourceLimits = {
@@ -52,21 +75,59 @@ function envInt(key: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function envFloat(key: string, fallback: number): number {
-  const raw = process.env[key];
-  if (!raw) return fallback;
-  const parsed = Number.parseFloat(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-/** Shared overage rate for capped plans ($0.60/min). */
-export const CALL_OVERAGE_USD_PER_MINUTE = envFloat(
-  "NEXT_PUBLIC_CALL_OVERAGE_USD_PER_MINUTE",
-  0.6,
-);
-
 /** Warn when included minutes reach this fraction (80%). */
 export const CALL_USAGE_WARN_RATIO = 0.8;
+
+/**
+ * Prepaid minute packs. Stripe Price IDs come from env — never hardcode live IDs.
+ *
+ * | Pack | Minutes | Price | Effective $/min | Margin vs $0.12–0.22 COGS |
+ * | pack_30 | 30 | $18 | $0.60 | ~$0.38–0.48/min |
+ * | pack_60 | 60 | $30 | $0.50 | ~$0.28–0.38/min |
+ * | pack_120 | 120 | $48 | $0.40 | ~$0.18–0.28/min |
+ */
+export const MINUTE_PACKS: MinutePack[] = [
+  {
+    id: "pack_30",
+    minutes: 30,
+    priceUsd: 18,
+    label: "30 minutes",
+    description: "Small top-up — about 60 cents per minute.",
+    stripePriceEnvKey: "STRIPE_PRICE_MINUTES_30",
+  },
+  {
+    id: "pack_60",
+    minutes: 60,
+    priceUsd: 30,
+    label: "60 minutes",
+    description: "Most chosen top-up — about 50 cents per minute.",
+    stripePriceEnvKey: "STRIPE_PRICE_MINUTES_60",
+  },
+  {
+    id: "pack_120",
+    minutes: 120,
+    priceUsd: 48,
+    label: "120 minutes",
+    description: "Best value — about 40 cents per minute.",
+    stripePriceEnvKey: "STRIPE_PRICE_MINUTES_120",
+  },
+];
+
+export function getMinutePack(id: string): MinutePack | undefined {
+  return MINUTE_PACKS.find((pack) => pack.id === id);
+}
+
+export function stripeMinutePackPriceId(packId: string): string | null {
+  const pack = getMinutePack(packId);
+  if (!pack) return null;
+  return process.env[pack.stripePriceEnvKey]?.trim() || null;
+}
+
+/** Effective USD per minute for a pack (for UI copy). */
+export function minutePackEffectiveRate(pack: MinutePack): number {
+  if (pack.minutes <= 0) return 0;
+  return Math.round((pack.priceUsd / pack.minutes) * 100) / 100;
+}
 
 const patronPrice = envInt("NEXT_PUBLIC_PLAN_PATRON_PRICE_USD", 29);
 const proPrice = envInt("NEXT_PUBLIC_PLAN_PRO_PRICE_USD", 79);
@@ -92,7 +153,7 @@ export const plans: Plan[] = [
     ctaHref: "/signup?plan=patron",
     callLimits: {
       includedCallMinutes: patronMinutes,
-      overagePerMinuteUsd: CALL_OVERAGE_USD_PER_MINUTE,
+      overagePerMinuteUsd: null,
     },
     resourceLimits: {
       maxMailboxes: 1,
@@ -101,7 +162,7 @@ export const plans: Plan[] = [
     },
     features: [
       `Includes ${patronMinutes} minutes of phone call-in per month`,
-      `Overage ${formatOverageRate(CALL_OVERAGE_USD_PER_MINUTE)} after included minutes (calls continue; you are warned)`,
+      "When included minutes run out, buy prepaid minute packs (they roll over) — no surprise overage",
       "Standard call-in voice (clear, lower cost)",
       "1 connected mailbox",
       "Read aloud: From, Subject, body, and attachments (text / PDF / DOCX / PPTX)",
@@ -123,7 +184,7 @@ export const plans: Plan[] = [
     ctaHref: "/signup?plan=pro",
     callLimits: {
       includedCallMinutes: proMinutes,
-      overagePerMinuteUsd: CALL_OVERAGE_USD_PER_MINUTE,
+      overagePerMinuteUsd: null,
     },
     resourceLimits: {
       maxMailboxes: 3,
@@ -132,7 +193,7 @@ export const plans: Plan[] = [
     },
     features: [
       `Includes ${proMinutes} minutes of phone call-in per month`,
-      `Overage ${formatOverageRate(CALL_OVERAGE_USD_PER_MINUTE)} after included minutes (same rate as Patron)`,
+      "When included minutes run out, buy prepaid minute packs (they roll over) — no surprise overage",
       "Premium call-in voice included (richer sound; uses more of plan dollar value)",
       "Outbound phone alerts for new Primary email",
       "3 connected mailboxes",
@@ -154,7 +215,7 @@ export const plans: Plan[] = [
     ctaHref: "/signup?plan=business",
     callLimits: {
       includedCallMinutes: null,
-      overagePerMinuteUsd: CALL_OVERAGE_USD_PER_MINUTE,
+      overagePerMinuteUsd: null,
     },
     resourceLimits: {
       maxMailboxes: null,
@@ -163,8 +224,8 @@ export const plans: Plan[] = [
     },
     features: [
       "Custom mailbox & assistant limits",
-      "Custom included call-in minutes (still metered — no unlimited calling)",
-      `Overage ${formatOverageRate(CALL_OVERAGE_USD_PER_MINUTE)} unless contracted otherwise`,
+      "Custom included call-in minutes (hard-capped — no unlimited calling)",
+      "Prepaid minute packs available; contracted pools on request",
       "Org-wide approval policies",
       "Outbound phone alerts for new Primary email",
       "Signed DPA and security review",

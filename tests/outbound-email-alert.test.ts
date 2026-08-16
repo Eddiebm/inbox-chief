@@ -37,6 +37,34 @@ describe("outbound Primary email calls", () => {
     ).toEqual({ eligible: false, reason: "no_new_primary" });
   });
 
+  it("does not place an outbound alert when no minutes remain (hard cap)", () => {
+    expect(
+      outboundAlertEligibility({
+        newPrimaryCount: 3,
+        enabled: true,
+        hasPhone: true,
+        mailboxConnected: true,
+        lastCalledAt: null,
+        atMinuteCap: true,
+        now: NOW,
+      }),
+    ).toEqual({ eligible: false, reason: "minute_cap" });
+  });
+
+  it("does place an outbound alert when minutes remain", () => {
+    expect(
+      outboundAlertEligibility({
+        newPrimaryCount: 1,
+        enabled: true,
+        hasPhone: true,
+        mailboxConnected: true,
+        lastCalledAt: null,
+        atMinuteCap: false,
+        now: NOW,
+      }),
+    ).toEqual({ eligible: true });
+  });
+
   it("batches bursts with a fifteen-minute cooldown", () => {
     expect(
       outboundAlertEligibility({

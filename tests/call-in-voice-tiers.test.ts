@@ -55,7 +55,8 @@ describe("call-in voice tiers", () => {
   it("Standard uses Cartesia; Premium uses ElevenLabs", () => {
     expect(STANDARD_VOICE.vapi.provider).toBe("cartesia");
     expect(STANDARD_VOICE.vapi.model).toBe("sonic-english");
-    expect(STANDARD_VOICE.vapi.experimentalControls?.speed).toBe("slow");
+    // Speed is applied per call from the saved rate, not hardcoded on the tier.
+    expect(STANDARD_VOICE.vapi.experimentalControls).toBeUndefined();
     expect(PREMIUM_VOICE.vapi.provider).toBe("11labs");
     expect(voiceTierInfo("standard").label).toMatch(/Standard/i);
     expect(voiceTierInfo("premium").label).toMatch(/Premium/i);
@@ -76,7 +77,7 @@ describe("call-in voice tiers", () => {
     expect(speakHighTtsCostTip()).toMatch(/Standard/i);
   });
 
-  it("assistant payload switches voice by tier with Cartesia clarity settings", () => {
+  it("assistant payload switches voice by tier and applies the default brisk rate", () => {
     const std = buildCallInAssistantPayload("https://example.com", {
       voiceTier: "standard",
     });
@@ -86,10 +87,29 @@ describe("call-in voice tiers", () => {
     expect(std.serverMessages).toContain("tool-calls");
     expect((std.voice as { provider: string }).provider).toBe("cartesia");
     expect((std.voice as { language?: string }).language).toBe("en");
+    // Default rate (brisk) → Cartesia numeric speed applied.
     expect(
-      (std.voice as { experimentalControls?: { speed?: string } })
+      (std.voice as { experimentalControls?: { speed?: number } })
         .experimentalControls?.speed,
-    ).toBe("slow");
+    ).toBe(0.2);
     expect((prem.voice as { provider: string }).provider).toBe("11labs");
+    // Premium (ElevenLabs) gets a numeric speed multiplier around 1.15x.
+    expect((prem.voice as { speed?: number }).speed).toBe(1.15);
+  });
+
+  it("applies a slower rate to both providers when requested", () => {
+    const std = buildCallInAssistantPayload("https://example.com", {
+      voiceTier: "standard",
+      speechRate: "slow",
+    });
+    const prem = buildCallInAssistantPayload("https://example.com", {
+      voiceTier: "premium",
+      speechRate: "slow",
+    });
+    expect(
+      (std.voice as { experimentalControls?: { speed?: number } })
+        .experimentalControls?.speed,
+    ).toBeLessThan(0);
+    expect((prem.voice as { speed?: number }).speed).toBeLessThan(1);
   });
 });

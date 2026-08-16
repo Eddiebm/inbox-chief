@@ -8,7 +8,7 @@
  * verification and hands the verified event here.
  */
 
-import { resolvePlanId } from "@/lib/plans";
+import { getMinutePack, resolvePlanId } from "@/lib/plans";
 import type { SubscriptionStatusValue } from "@/lib/billing/entitlements";
 
 /** Loose shape of the Stripe object we read (session / subscription / invoice). */
@@ -18,12 +18,18 @@ export type StripeWebhookObject = {
   status?: string;
   customer?: string | { id?: string } | null;
   subscription?: string | { id?: string } | null;
+  payment_intent?: string | { id?: string } | null;
+  payment_status?: string | null;
+  mode?: string | null;
+  amount_total?: number | null;
   current_period_end?: number | null;
   trial_end?: number | null;
   cancel_at_period_end?: boolean | null;
   metadata?: {
     organizationId?: string;
     planKey?: string;
+    minutePackKey?: string;
+    purchaseKind?: string;
     userId?: string;
   } | null;
   items?: {
@@ -33,6 +39,55 @@ export type StripeWebhookObject = {
     }>;
   } | null;
 };
+
+export type NormalizedMinutePackPurchase =
+  | {
+      kind: "credit";
+      organizationId: string;
+      packId: string;
+      minutes: number;
+      amountUsdCents: number;
+      stripeCheckoutSessionId: string;
+      stripePaymentIntentId: string | null;
+    }
+  | { kind: "ignore"; reason: string };
+
+/**
+ * Recognize a paid one-time minute-pack Checkout Session. Pack size and amount
+ * come from our catalog, never client-controlled metadata.
+ */
+export function normalizeMinutePackPurchase(
+  type: string,
+  obj: StripeWebhookObject,
+): NormalizedMinutePackPurchase {
+  if (
+    type !== "checkout.session.completed" &&
+    type !== "checkout.session.async_payment_succeeded"
+  ) {
+    return { kind: "ignore", reason: "not_checkout_payment" };
+  }
+  if (
+    obj.mode !== "payment" ||
+    obj.payment_status !== "paid" ||
+    obj.metadata?.purchaseKind !== "minute_pack"
+  ) {
+    return { kind: "ignore", reason: "not_paid_minute_pack" };
+  }
+  const organizationId = obj.metadata.organizationId?.trim();
+  const pack = getMinutePack(obj.metadata.minutePackKey?.trim() ?? "");
+  if (!organizationId || !pack || !obj.id) {
+    return { kind: "ignore", reason: "missing_pack_metadata" };
+  }
+  return {
+    kind: "credit",
+    organizationId,
+    packId: pack.id,
+    minutes: pack.minutes,
+    amountUsdCents: pack.priceUsd * 100,
+    stripeCheckoutSessionId: obj.id,
+    stripePaymentIntentId: idFrom(obj.payment_intent),
+  };
+}
 
 export type NormalizedSubscriptionChange =
   | {
@@ -114,6 +169,15 @@ export function normalizeStripeEvent(
 
   switch (type) {
     case "checkout.session.completed": {
+      // Prepaid minute packs use mode=payment and are credited by
+      // normalizeMinutePackPurchase — do not treat them as subscriptions.
+      if (
+        obj.mode === "payment" ||
+        obj.metadata?.purchaseKind === "minute_pack"
+      ) {
+        return { kind: "ignore" };
+      }
+
       // Session carries our metadata + the new subscription/customer ids.
       // Status is not on the session; a completed checkout means the plan is
       // live now (ACTIVE). The follow-up customer.subscription.* event refines
@@ -193,8 +257,95 @@ export type PrismaForWebhook = {
   };
 };
 
+type MinutePackTransaction = {
+  callMinutePackPurchase: {
+    findUnique: (args: {
+      where: { stripeCheckoutSessionId: string };
+    }) => Promise<{ id: string } | null>;
+    create: (args: {
+      data: Record<string, unknown>;
+    }) => Promise<{ id: string }>;
+  };
+  callMinuteBalance: {
+    upsert: (args: {
+      where: { organizationId: string };
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+      select: { id: true; purchasedMinutesRemaining: true };
+    }) => Promise<{ id: string; purchasedMinutesRemaining: number }>;
+  };
+};
+
+export type PrismaForMinutePackWebhook = {
+  $transaction: <T>(
+    fn: (tx: MinutePackTransaction) => Promise<T>,
+  ) => Promise<T>;
+};
+
+export type ApplyMinutePackResult =
+  | {
+      applied: true;
+      action: "credited";
+      minutesCredited: number;
+      purchasedMinutesRemaining: number;
+    }
+  | { applied: false; reason: string };
+
+/** Credit a paid pack exactly once and retain an audit row. */
+export async function applyMinutePackPurchase(
+  prisma: PrismaForMinutePackWebhook,
+  purchase: NormalizedMinutePackPurchase,
+): Promise<ApplyMinutePackResult> {
+  if (purchase.kind === "ignore") {
+    return { applied: false, reason: purchase.reason };
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const existing = await tx.callMinutePackPurchase.findUnique({
+      where: {
+        stripeCheckoutSessionId: purchase.stripeCheckoutSessionId,
+      },
+    });
+    if (existing) return { applied: false, reason: "already_credited" };
+
+    const balance = await tx.callMinuteBalance.upsert({
+      where: { organizationId: purchase.organizationId },
+      create: {
+        organizationId: purchase.organizationId,
+        purchasedMinutesRemaining: purchase.minutes,
+        purchasedMinutesLifetime: purchase.minutes,
+      },
+      update: {
+        purchasedMinutesRemaining: { increment: purchase.minutes },
+        purchasedMinutesLifetime: { increment: purchase.minutes },
+      },
+      select: { id: true, purchasedMinutesRemaining: true },
+    });
+    await tx.callMinutePackPurchase.create({
+      data: {
+        organizationId: purchase.organizationId,
+        balanceId: balance.id,
+        packId: purchase.packId,
+        minutesCredited: purchase.minutes,
+        amountUsdCents: purchase.amountUsdCents,
+        stripeCheckoutSessionId: purchase.stripeCheckoutSessionId,
+        stripePaymentIntentId: purchase.stripePaymentIntentId,
+      },
+    });
+    return {
+      applied: true,
+      action: "credited",
+      minutesCredited: purchase.minutes,
+      purchasedMinutesRemaining: balance.purchasedMinutesRemaining,
+    };
+  });
+}
+
 export type ApplyResult =
-  | { applied: true; action: "created" | "updated" | "canceled" | "past_due" }
+  | {
+      applied: true;
+      action: "created" | "updated" | "canceled" | "past_due";
+    }
   | { applied: false; reason: string };
 
 /**

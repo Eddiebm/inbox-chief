@@ -2,17 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
-import {
-  CALL_OVERAGE_USD_PER_MINUTE,
-  formatOverageRate,
-  formatPlanPrice,
-  plans,
-} from "@/lib/plans";
+import { formatPlanPrice, plans } from "@/lib/plans";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
   title: `Pricing — ${product.name}`,
-  description: `${product.name} Patron and Pro plans with included call-in minutes and clear overage — never unlimited.`,
+  description: `${product.name} Patron and Pro plans with included call-in minutes plus prepaid minute packs — never unlimited, never surprise overage.`,
 };
 
 export default function PricingPage() {
@@ -26,11 +21,11 @@ export default function PricingPage() {
         <header className="page-header">
           <h1>Pricing</h1>
           <p>
-            Transparent plans with included phone call-in minutes. After your
-            included minutes, overage is{" "}
-            {formatOverageRate(CALL_OVERAGE_USD_PER_MINUTE)} — spoken and shown
-            clearly. We do not offer unlimited calling. Every tier keeps human
-            approval and accessibility front and center.
+            Transparent plans with included phone call-in minutes. When those
+            run out, buy prepaid minute packs (they roll over until used),
+            upgrade, or wait for the next period — no surprise overage. We do
+            not offer unlimited calling. Every tier keeps human approval and
+            accessibility front and center.
           </p>
         </header>
 

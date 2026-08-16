@@ -4,11 +4,22 @@ import { getCurrentUser } from "@/lib/auth";
 import {
   getCallInVoicePreferenceForUser,
   setCallInVoicePreference,
+  setCallInSpeechRateForUser,
 } from "@/lib/call-in/voice-preference";
 import {
   CALL_IN_VOICE_TIERS,
   voiceTierUpgradeHint,
 } from "@/lib/call-in/voice-tiers";
+import {
+  CALL_IN_SPEECH_RATES,
+  DEFAULT_CALL_IN_SPEECH_RATE,
+  speechRateLabel,
+} from "@/lib/call-in/speech-rate";
+
+const SPEECH_RATE_OPTIONS = CALL_IN_SPEECH_RATES.map((rate) => ({
+  id: rate,
+  label: speechRateLabel(rate),
+}));
 
 /**
  * GET current call-in voice tier preference + plan gating.
@@ -31,6 +42,8 @@ export async function GET() {
         label: t.label,
         description: t.description,
       })),
+      speechRate: DEFAULT_CALL_IN_SPEECH_RATE,
+      speechRates: SPEECH_RATE_OPTIONS,
       persisted: false,
     });
   }
@@ -50,12 +63,15 @@ export async function GET() {
       label: t.label,
       description: t.description,
     })),
+    speechRate: pref?.speechRate ?? DEFAULT_CALL_IN_SPEECH_RATE,
+    speechRates: SPEECH_RATE_OPTIONS,
     persisted: true,
   });
 }
 
 const putSchema = z.object({
-  tier: z.enum(["standard", "premium"]),
+  tier: z.enum(["standard", "premium"]).optional(),
+  speechRate: z.enum(CALL_IN_SPEECH_RATES).optional(),
 });
 
 /**
@@ -75,17 +91,37 @@ export async function PUT(request: Request) {
   }
 
   const parsed = putSchema.safeParse(body);
-  if (!parsed.success) {
+  if (!parsed.success || (!parsed.data.tier && !parsed.data.speechRate)) {
     return NextResponse.json(
-      { error: "Choose standard or premium voice." },
+      { error: "Choose a voice tier or a reading speed." },
       { status: 400 },
     );
+  }
+
+  // Reading speed is available to every plan and does not affect tier gating.
+  if (parsed.data.speechRate) {
+    if (process.env.MOCK_INTEGRATIONS === "true" || !process.env.DATABASE_URL) {
+      return NextResponse.json({
+        ok: true,
+        speechRate: parsed.data.speechRate,
+        message: "Demo mode — reading speed is not saved.",
+      });
+    }
+    const rate = await setCallInSpeechRateForUser({
+      userId: user.id,
+      rate: parsed.data.speechRate,
+    });
+    return NextResponse.json({
+      ok: true,
+      speechRate: rate,
+      message: `Reading speed saved: ${speechRateLabel(rate)}. It applies on your next call and you can also say faster, slower, or normal speed while on a call.`,
+    });
   }
 
   if (process.env.MOCK_INTEGRATIONS === "true" || !process.env.DATABASE_URL) {
     return NextResponse.json({
       ok: true,
-      preferred: parsed.data.tier === "premium" ? "standard" : "standard",
+      preferred: "standard",
       effective: "standard",
       allowsPremium: false,
       message: "Demo mode — voice preference is not saved.",
@@ -94,7 +130,7 @@ export async function PUT(request: Request) {
 
   const result = await setCallInVoicePreference({
     userId: user.id,
-    tier: parsed.data.tier,
+    tier: parsed.data.tier!,
   });
 
   if (result.blocked === "premium_requires_pro") {

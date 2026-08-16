@@ -19,10 +19,15 @@ export type VapiVoiceConfig = {
   voiceId: string;
   model?: string;
   language?: string;
-  /** Cartesia clarity: slightly slower reads better for blind patrons */
+  /**
+   * Cartesia speed. Accepts the named steps or a number in [-1, 1] (0 = normal,
+   * positive = faster). The live speech rate is applied via applySpeechRateToVoice.
+   */
   experimentalControls?: {
-    speed?: "slowest" | "slow" | "normal" | "fast" | "fastest";
+    speed?: "slowest" | "slow" | "normal" | "fast" | "fastest" | number;
   };
+  /** ElevenLabs speed multiplier (VAPI range [0.7, 1.2], 1.0 = normal). */
+  speed?: number;
 };
 
 export type CallInVoiceTierInfo = {
@@ -42,7 +47,9 @@ export type SpeechBudgets = {
 
 /**
  * Standard — Cartesia Sonic (clear American English, much cheaper than ElevenLabs).
- * Tuned for max clarity at min cost: sonic-english + slight slow for intelligibility.
+ * Tuned for max clarity at min cost: sonic-english. The reading speed is applied
+ * per call from the patron's saved speech rate (applySpeechRateToVoice), so the
+ * base config intentionally leaves speed unset.
  * Voice: "Katie" — bright, screen-reader-friendly.
  */
 export const STANDARD_VOICE: CallInVoiceTierInfo = {
@@ -55,7 +62,6 @@ export const STANDARD_VOICE: CallInVoiceTierInfo = {
     voiceId: "a0e99841-438c-4a64-b679-ae501e7d6091",
     model: "sonic-english",
     language: "en",
-    experimentalControls: { speed: "slow" },
   },
 };
 

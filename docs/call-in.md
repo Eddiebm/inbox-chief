@@ -60,9 +60,9 @@ Preference is stored on `AccessibilityPreference.callInVoiceTier`. Settings → 
 
 Optional first-call tip (once): “Using standard voice to keep costs down. Premium is on Pro.”
 
-Premium uses more of included minutes’ **dollar value**; overage $/min is unchanged.
+Premium uses more of included minutes’ **dollar value**. Extra use is prepaid minute packs (rollover), not silent overage.
 
-On `end-of-call-report`, Inbox Chief stores **call cost in USD** (VAPI `cost` / `call.cost`, plus duration and `endedReason`) on `CallSession`, scoped to the matched `CallInIdentity` tenant. If the webhook omits cost, it falls back to `GET https://api.vapi.ai/call/:id` using `VAPI_API_KEY`. Running tallies appear under **Call costs** on `/dashboard/call-in` and Settings (`GET /api/call-in/costs`). Org minute usage for the billing period is at `GET /api/billing/usage` (included / used / overage). Soft cap: warn at 80% and at the included limit; calls continue and overage is metered — never cut off mid-email without warning.
+On `end-of-call-report`, Inbox Chief stores **call cost in USD** (VAPI `cost` / `call.cost`, plus duration and `endedReason`) on `CallSession`, scoped to the matched `CallInIdentity` tenant. If the webhook omits cost, it falls back to `GET https://api.vapi.ai/call/:id` using `VAPI_API_KEY`. Running tallies appear under **Call costs** on `/dashboard/call-in` and Settings (`GET /api/call-in/costs`). Org minute usage for the billing period is at `GET /api/billing/usage` (included / used / purchased remaining). **Hard stop when both included remaining and purchased balance are zero** — billable tools and outbound email→call alerts are blocked; the assistant speaks `spokenCapReached` verbatim (buy more minutes, upgrade, or wait). Warn at 80% of included; when included is exhausted but purchased remains, speak that purchased minutes are in use. Prepaid packs: 30/$18, 60/$30, 120/$48 via Stripe one-time checkout.
 
 **Accessibility (blind patrons):** briefing and “read my emails” speak messages **one at a time** — From, Subject, then body or snippet — then pause for next / more detail / draft in the app. **Nothing sends email from a call.**
 

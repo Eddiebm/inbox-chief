@@ -1,11 +1,105 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyMinutePackPurchase,
   applySubscriptionChange,
   mapStripeStatus,
+  normalizeMinutePackPurchase,
   normalizeStripeEvent,
   stripePeriodEnd,
+  type PrismaForMinutePackWebhook,
   type PrismaForWebhook,
 } from "@/lib/billing/stripe-webhook";
+
+describe("prepaid minute-pack webhook", () => {
+  it("normalizes only paid one-time minute packs", () => {
+    const purchase = normalizeMinutePackPurchase(
+      "checkout.session.completed",
+      {
+        id: "cs_pack_1",
+        mode: "payment",
+        payment_status: "paid",
+        payment_intent: "pi_1",
+        metadata: {
+          purchaseKind: "minute_pack",
+          minutePackKey: "pack_60",
+          organizationId: "org_1",
+        },
+      },
+    );
+    expect(purchase).toMatchObject({
+      kind: "credit",
+      packId: "pack_60",
+      minutes: 60,
+      amountUsdCents: 3000,
+    });
+    expect(
+      normalizeMinutePackPurchase("checkout.session.completed", {
+        id: "cs_unpaid",
+        mode: "payment",
+        payment_status: "unpaid",
+        metadata: {
+          purchaseKind: "minute_pack",
+          minutePackKey: "pack_60",
+          organizationId: "org_1",
+        },
+      }).kind,
+    ).toBe("ignore");
+  });
+
+  it("credits a paid pack once", async () => {
+    let remaining = 10;
+    const sessions = new Set<string>();
+    const tx = {
+      callMinutePackPurchase: {
+        findUnique: async ({ where }: {
+          where: { stripeCheckoutSessionId: string };
+        }) =>
+          sessions.has(where.stripeCheckoutSessionId) ? { id: "purchase_1" } : null,
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          sessions.add(String(data.stripeCheckoutSessionId));
+          return { id: "purchase_1" };
+        },
+      },
+      callMinuteBalance: {
+        upsert: async (args: {
+          update: Record<string, unknown>;
+        }) => {
+          const increment = (
+            args.update.purchasedMinutesRemaining as { increment: number }
+          ).increment;
+          remaining += increment;
+          return { id: "balance_1", purchasedMinutesRemaining: remaining };
+        },
+      },
+    };
+    const prisma = {
+      $transaction: async <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx),
+    } as PrismaForMinutePackWebhook;
+    const purchase = normalizeMinutePackPurchase(
+      "checkout.session.completed",
+      {
+        id: "cs_pack_1",
+        mode: "payment",
+        payment_status: "paid",
+        metadata: {
+          purchaseKind: "minute_pack",
+          minutePackKey: "pack_30",
+          organizationId: "org_1",
+        },
+      },
+    );
+    expect(await applyMinutePackPurchase(prisma, purchase)).toMatchObject({
+      applied: true,
+      minutesCredited: 30,
+      purchasedMinutesRemaining: 40,
+    });
+    expect(await applyMinutePackPurchase(prisma, purchase)).toEqual({
+      applied: false,
+      reason: "already_credited",
+    });
+    expect(remaining).toBe(40);
+  });
+});
 
 type Row = {
   id: string;

@@ -11,6 +11,9 @@ type TierOption = {
   description: string;
 };
 
+type SpeechRate = "slow" | "normal" | "brisk" | "fast";
+type SpeechRateOption = { id: SpeechRate; label: string };
+
 /**
  * Accessible Standard / Premium call-in voice picker.
  * Premium gated to Pro; Patron sees upgrade path.
@@ -22,6 +25,11 @@ export function CallInVoiceSettings() {
   const [effective, setEffective] = useState<"standard" | "premium">("standard");
   const [allowsPremium, setAllowsPremium] = useState(false);
   const [costGuardActive, setCostGuardActive] = useState(false);
+  const [speechRate, setSpeechRate] = useState<SpeechRate>("brisk");
+  const [speechRates, setSpeechRates] = useState<SpeechRateOption[]>([]);
+  const [speedStatus, setSpeedStatus] = useState(
+    "Brisk is the default — you can also say “faster”, “slower”, or “normal speed” on a call.",
+  );
   const [status, setStatus] = useState("Loading voice settings…");
   const [busy, setBusy] = useState(false);
 
@@ -37,6 +45,8 @@ export function CallInVoiceSettings() {
           allowsPremium?: boolean;
           costGuardActive?: boolean;
           tiers?: TierOption[];
+          speechRate?: SpeechRate;
+          speechRates?: SpeechRateOption[];
           error?: string;
         };
         if (cancelled) return;
@@ -49,6 +59,8 @@ export function CallInVoiceSettings() {
         setAllowsPremium(Boolean(data.allowsPremium));
         setCostGuardActive(Boolean(data.costGuardActive));
         setTiers(data.tiers ?? []);
+        if (data.speechRate) setSpeechRate(data.speechRate);
+        if (data.speechRates?.length) setSpeechRates(data.speechRates);
         if (data.costGuardActive) {
           setStatus(
             "Near your included minutes — Standard voice is active for the next calls to stretch your plan.",
@@ -99,6 +111,38 @@ export function CallInVoiceSettings() {
       setStatus(data.message ?? "Saved.");
     } catch {
       setStatus("Network error. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function selectSpeechRate(rate: SpeechRate) {
+    const previous = speechRate;
+    setSpeechRate(rate);
+    setBusy(true);
+    setSpeedStatus("Saving reading speed…");
+    try {
+      const res = await fetch("/api/call-in/voice", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ speechRate: rate }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        speechRate?: SpeechRate;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setSpeechRate(previous);
+        setSpeedStatus(data.error ?? "Could not save reading speed.");
+        return;
+      }
+      if (data.speechRate) setSpeechRate(data.speechRate);
+      setSpeedStatus(data.message ?? "Reading speed saved.");
+    } catch {
+      setSpeechRate(previous);
+      setSpeedStatus("Network error. Try again.");
     } finally {
       setBusy(false);
     }
@@ -170,6 +214,45 @@ export function CallInVoiceSettings() {
         {costGuardActive
           ? " Cost guard: Standard preferred until minutes reset."
           : ""}
+      </p>
+
+      <h3 id="call-in-speed-heading">Reading speed</h3>
+      <p>
+        How fast {product.name} reads your email aloud on the phone. Brisk is
+        the default. On a call you can also just say “faster”, “slower”, or
+        “normal speed” at any time — your choice is saved for next time.
+      </p>
+      <fieldset disabled={busy}>
+        <legend className="sr-only">Call-in reading speed</legend>
+        {(speechRates.length
+          ? speechRates
+          : [
+              { id: "slow" as const, label: "Slow (most time to follow)" },
+              { id: "normal" as const, label: "Normal" },
+              {
+                id: "brisk" as const,
+                label: "Brisk (default — a little faster)",
+              },
+              { id: "fast" as const, label: "Fast (quickest)" },
+            ]
+        ).map((rate) => (
+          <div key={rate.id} className="form-field">
+            <label>
+              <input
+                type="radio"
+                name="call-in-speech-rate"
+                value={rate.id}
+                checked={speechRate === rate.id}
+                disabled={busy}
+                onChange={() => void selectSpeechRate(rate.id)}
+              />{" "}
+              {rate.label}
+            </label>
+          </div>
+        ))}
+      </fieldset>
+      <p className="status-line" role="status" aria-live="polite">
+        {speedStatus}
       </p>
     </section>
   );

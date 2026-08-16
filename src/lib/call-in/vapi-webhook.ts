@@ -8,6 +8,10 @@ import {
   neverSendSpoken,
 } from "@/lib/call-in/vapi-tools";
 import { resolveCallInVoiceForUser } from "@/lib/call-in/voice-preference";
+import {
+  DEFAULT_CALL_IN_SPEECH_RATE,
+  type CallInSpeechRate,
+} from "@/lib/call-in/speech-rate";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
 import {
   googleConsentGuidanceSpoken,
@@ -124,8 +128,9 @@ export type VapiWebhookHandleResult =
     };
 
 /**
- * Opening speech plus soft-cap minute warning at 80% / included limit.
- * Does not cut off the call — overage is metered.
+ * Opening speech plus minute warning at 80%, or the hard-stop message at 100%.
+ * At the hard cap the opening leads with the exhausted message so a blind
+ * patron immediately knows call-in is paused (tools are also denied).
  */
 async function openingWithUsageWarning(
   snapshot: Awaited<
@@ -142,6 +147,7 @@ async function openingWithUsageWarning(
   }
   try {
     const usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
+    if (usage.hardCapReached) return usage.spokenCapReached;
     if (usage.warningLevel === "none" || !usage.spokenWarning) return base;
     return `${base} ${usage.spokenWarning}`;
   } catch {
@@ -179,6 +185,7 @@ export async function handleVapiCallInWebhook(
     }
 
     let usageWarning = "";
+    let hardCap: { reached: boolean; spoken: string } | null = null;
     if (
       resolved.matched &&
       resolved.snapshot.organizationId !== "demo_org" &&
@@ -186,7 +193,10 @@ export async function handleVapiCallInWebhook(
     ) {
       try {
         const usage = await loadCallMinuteUsageForOrg(resolved.snapshot.organizationId);
-        if (usage.warningLevel !== "none" && usage.spokenWarning) {
+        if (usage.hardCapReached) {
+          // Hard stop: deny billable tools; speak the exhausted message.
+          hardCap = { reached: true, spoken: usage.spokenCapReached };
+        } else if (usage.warningLevel !== "none" && usage.spokenWarning) {
           usageWarning = usage.spokenWarning;
         }
       } catch {
@@ -220,6 +230,7 @@ export async function handleVapiCallInWebhook(
           callerPhone,
           callInIdentityId: resolved.callInIdentityId,
           callId,
+          hardCap,
         });
         // Only the explicit second-stage confirmation tool may report a send.
         if (handled.emailSent && parsed.name !== "confirm_email_send") {
@@ -274,6 +285,7 @@ export async function handleVapiCallInWebhook(
       "https://inbox-chief-kappa.vercel.app";
 
     let voiceTier: "standard" | "premium" = "standard";
+    let speechRate: CallInSpeechRate = DEFAULT_CALL_IN_SPEECH_RATE;
     if (resolved.matched && resolved.userId) {
       try {
         const voice = await resolveCallInVoiceForUser({
@@ -281,6 +293,7 @@ export async function handleVapiCallInWebhook(
           organizationId: resolved.snapshot.organizationId,
         });
         voiceTier = voice.effective;
+        speechRate = voice.speechRate;
         if (voice.spokenTip) {
           spoken = `${spoken} ${voice.spokenTip}`;
         }
@@ -291,6 +304,7 @@ export async function handleVapiCallInWebhook(
 
     const payload = buildCallInAssistantPayload(baseUrl, {
       voiceTier,
+      speechRate,
       firstMessage: spoken,
     });
     if (isUnrecognizedCaller(resolved.snapshot)) {

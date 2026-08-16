@@ -11,7 +11,7 @@ export const runtime = "nodejs";
 
 /**
  * Call-in minute usage for the signed-in user's organization this billing period.
- * Soft cap: overage is allowed and metered; response includes plain + spoken warnings.
+ * Included + purchased balance; hard stop when both are exhausted.
  */
 export async function GET() {
   const user = await getCurrentUser();

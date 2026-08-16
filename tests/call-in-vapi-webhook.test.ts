@@ -176,6 +176,57 @@ describe("VAPI call-in webhook tool routing", () => {
     }
   });
 
+  it("hard cap denies billable tools and speaks the exhausted message verbatim", async () => {
+    const capSpoken =
+      "You have no call minutes left. Your 90 included minutes for this Patron period are used up, and you have no purchased minutes remaining. To keep using call-in, buy more minutes or upgrade your plan in the Inbox Chief dashboard, or wait until your included minutes reset on September 1. I cannot read more mail or start a new request until then.";
+    const hardCap = { reached: true, spoken: capSpoken };
+
+    // Reading / composing / asking is denied at the cap — no mail is read.
+    for (const name of [
+      "read_emails",
+      "get_briefing",
+      "get_needs_attention",
+      "ask_inbox",
+      "compose_email",
+    ] as const) {
+      const handled = await handleCallInTool({
+        name,
+        args: { question: "read my emails", body: "hi", recipient: "x@y.com" },
+        snapshot: snap,
+        hardCap,
+      });
+      expect(handled.intent).toBe("minute_cap");
+      expect(handled.spoken).toBe(capSpoken);
+      expect(handled.spoken.toLowerCase()).toContain("buy more minutes");
+      expect(handled.emailSent).toBe(false);
+      expect(handled.spoken).not.toMatch(/Schedule confirmation|Jordan Lee/i);
+    }
+  });
+
+  it("hard cap still allows cheap setup/status tools", async () => {
+    const hardCap = {
+      reached: true,
+      spoken: "You have used all your minutes.",
+    };
+    const status = await handleCallInTool({
+      name: "get_connection_status",
+      snapshot: snap,
+      hardCap,
+    });
+    expect(status.intent).not.toBe("minute_cap");
+    expect(status.spoken).toMatch(/connect|connection|disconnected/i);
+  });
+
+  it("under the cap, tools run normally (no minute_cap block)", async () => {
+    const handled = await handleCallInTool({
+      name: "read_emails",
+      snapshot: snap,
+      hardCap: { reached: false, spoken: "unused" },
+    });
+    expect(handled.intent).toBe("read_emails");
+    expect(handled.spoken).toMatch(/Email 1 of|From Jordan/i);
+  });
+
   it("unmatched caller with MOCK off never gets demo email subjects", async () => {
     process.env.MOCK_INTEGRATIONS = "false";
     process.env.DATABASE_URL = "postgresql://unused";

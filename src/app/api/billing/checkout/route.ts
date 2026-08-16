@@ -2,21 +2,32 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
 import { resolveUserMailboxScope } from "@/lib/mail/tenant-context";
-import { getPlan, resolvePlanId, stripePriceEnvKey } from "@/lib/plans";
+import {
+  getMinutePack,
+  getPlan,
+  resolvePlanId,
+  stripeMinutePackPriceId,
+  stripePriceEnvKey,
+} from "@/lib/plans";
 import { isOperatorEmail } from "@/lib/operator";
 
 const checkoutSchema = z.object({
   organizationId: z.string().min(1).optional(),
-  planKey: z.enum([
-    "patron",
-    "pro",
-    "business",
-    "solo",
-    "professional",
-    "executive",
-  ]),
+  planKey: z
+    .enum([
+      "patron",
+      "pro",
+      "business",
+      "solo",
+      "professional",
+      "executive",
+    ])
+    .optional(),
+  minutePackKey: z.enum(["pack_30", "pack_60", "pack_120"]).optional(),
   successUrl: z.string().url().optional(),
   cancelUrl: z.string().url().optional(),
+}).refine((value) => Boolean(value.planKey) !== Boolean(value.minutePackKey), {
+  message: "Choose one plan or minute pack.",
 });
 
 function stripeConfigured(): boolean {
@@ -43,14 +54,19 @@ export async function POST(request: Request) {
   const parsed = checkoutSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "planKey is required." },
+      { error: "Choose one plan or minute pack." },
       { status: 400 },
     );
   }
 
-  const planKey = resolvePlanId(parsed.data.planKey);
-  const plan = getPlan(planKey);
-  if (!plan || plan.price.kind !== "monthly") {
+  const minutePack = parsed.data.minutePackKey
+    ? getMinutePack(parsed.data.minutePackKey)
+    : null;
+  const planKey = parsed.data.planKey
+    ? resolvePlanId(parsed.data.planKey)
+    : null;
+  const plan = planKey ? getPlan(planKey) : null;
+  if (!minutePack && (!plan || plan.price.kind !== "monthly")) {
     return NextResponse.json(
       { error: "That plan is not available for self-serve checkout." },
       { status: 400 },
@@ -65,6 +81,12 @@ export async function POST(request: Request) {
       : null;
   const organizationId =
     scope?.organizationId ?? parsed.data.organizationId ?? null;
+  if (minutePack && (!user || !scope?.organizationId)) {
+    return NextResponse.json(
+      { error: "Sign in to buy minutes for your organization." },
+      { status: 401 },
+    );
+  }
 
   if (!stripeConfigured()) {
     return NextResponse.json(
@@ -73,14 +95,16 @@ export async function POST(request: Request) {
         reason: "stripe_not_configured",
         // Only operators see env guidance; patrons get a short support line.
         message: isOperator
-          ? "Billing not live — set STRIPE_SECRET_KEY and STRIPE_PRICE_PATRON / STRIPE_PRICE_PRO."
+          ? "Billing not live — set STRIPE_SECRET_KEY and the Stripe plan / minute-pack price IDs."
           : "Checkout is not available yet. Please contact support.",
       },
       { status: 503 },
     );
   }
 
-  const priceId = priceIdForPlan(planKey);
+  const priceId = minutePack
+    ? stripeMinutePackPriceId(minutePack.id)
+    : priceIdForPlan(planKey!);
   const origin = new URL(request.url).origin;
   const successUrl =
     parsed.data.successUrl ??
@@ -93,12 +117,15 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       stub: true,
-      sessionId: `cs_test_stub_${planKey}`,
+      sessionId: `cs_test_stub_${minutePack?.id ?? planKey}`,
       url: `${successUrl}${successUrl.includes("?") ? "&" : "?"}stub=1`,
       organizationId,
       planKey,
+      minutePackKey: minutePack?.id ?? null,
       message: isOperator
-        ? `Billing not live for ${planKey} — set ${stripePriceEnvKey(planKey)}.`
+        ? `Billing not live for ${minutePack?.id ?? planKey} — set ${
+            minutePack?.stripePriceEnvKey ?? stripePriceEnvKey(planKey!)
+          }.`
         : "Checkout is almost ready. Please contact support.",
     });
   }
@@ -120,7 +147,7 @@ export async function POST(request: Request) {
     }
 
     const session = await stripe.checkout.sessions.create({
-      mode: "subscription",
+      mode: minutePack ? "payment" : "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -128,15 +155,21 @@ export async function POST(request: Request) {
       ...(user?.email && !customerId ? { customer_email: user.email } : {}),
       metadata: {
         organizationId: organizationId ?? "",
-        planKey,
+        planKey: planKey ?? "",
+        purchaseKind: minutePack ? "minute_pack" : "subscription",
+        minutePackKey: minutePack?.id ?? "",
         userId: user?.id ?? "",
       },
-      subscription_data: {
-        metadata: {
-          organizationId: organizationId ?? "",
-          planKey,
-        },
-      },
+      ...(minutePack
+        ? {}
+        : {
+            subscription_data: {
+              metadata: {
+                organizationId: organizationId ?? "",
+                planKey: planKey!,
+              },
+            },
+          }),
     });
 
     return NextResponse.json({
@@ -146,6 +179,7 @@ export async function POST(request: Request) {
       url: session.url,
       organizationId,
       planKey,
+      minutePackKey: minutePack?.id ?? null,
     });
   } catch (err) {
     console.error("[billing/checkout]", err);

@@ -85,9 +85,11 @@ export function CallCostsTally() {
     >
       <h2 id={headingId}>Call costs</h2>
       <p>
-        Phone call-in uses included minutes on your plan, then a clear overage
-        rate. Browser voice ask does not add to this tally. Provider cost in US
-        dollars is shown for your records. {premiumVsStandardCostCopy()}
+        Phone call-in uses included minutes on your plan first, then any prepaid
+        minutes you bought (they roll over). Call-in pauses only when both are
+        empty — no surprise overage. Browser voice ask does not add to this
+        tally. Provider cost in US dollars is shown for your records.{" "}
+        {premiumVsStandardCostCopy()}
       </p>
       <p id={statusId} className="status-line" role="status" aria-live="polite">
         {message}

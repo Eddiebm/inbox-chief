@@ -36,7 +36,10 @@ export async function GET() {
   const stripeWebhook = Boolean(process.env.STRIPE_WEBHOOK_SECRET?.trim());
   const stripePrices = Boolean(
     process.env.STRIPE_PRICE_PATRON?.trim() &&
-      process.env.STRIPE_PRICE_PRO?.trim(),
+      process.env.STRIPE_PRICE_PRO?.trim() &&
+      process.env.STRIPE_PRICE_MINUTES_30?.trim() &&
+      process.env.STRIPE_PRICE_MINUTES_60?.trim() &&
+      process.env.STRIPE_PRICE_MINUTES_120?.trim(),
   );
 
   const checks = {

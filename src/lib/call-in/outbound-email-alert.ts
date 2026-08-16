@@ -195,7 +195,8 @@ export async function triggerOutboundEmailAlert(input: {
     hasPhone: Boolean(identity?.phoneE164),
     mailboxConnected: input.mailboxConnected,
     lastCalledAt: identity?.lastOutboundEmailCallAt ?? null,
-    atMinuteCap: usage?.warningLevel === "at_limit",
+    // Hard cap: never place a new billable outbound alert at/over the cap.
+    atMinuteCap: usage?.hardCapReached ?? false,
     now: input.now,
   });
   if (!decision.eligible) {

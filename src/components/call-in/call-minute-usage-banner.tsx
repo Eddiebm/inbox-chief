@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
+import Link from "next/link";
 import type { CallMinuteUsage } from "@/lib/billing/call-usage";
 
 type UsageResponse = {
@@ -12,8 +13,8 @@ type UsageResponse = {
 };
 
 /**
- * Soft-cap call-minute warning for Call-in (before / during session).
- * Warns at 80% and at the included limit; does not block calling.
+ * Hard-cap call-minute status for Call-in (before / during session).
+ * Shows included usage, rollover minutes, and a direct top-up path.
  */
 export function CallMinuteUsageBanner() {
   const headingId = useId();
@@ -57,24 +58,32 @@ export function CallMinuteUsageBanner() {
   if (!usage) return null;
 
   const showWarn = usage.warningLevel !== "none";
+  const capped = usage.hardCapReached;
 
   return (
     <aside
       className={
-        showWarn
-          ? "settings-block call-minute-usage-banner call-minute-usage-banner--warn"
-          : "settings-block call-minute-usage-banner"
+        capped
+          ? "settings-block call-minute-usage-banner call-minute-usage-banner--capped"
+          : showWarn
+            ? "settings-block call-minute-usage-banner call-minute-usage-banner--warn"
+            : "settings-block call-minute-usage-banner"
       }
       aria-labelledby={headingId}
     >
       <h2 id={headingId} className="call-minute-usage-banner__title">
-        Call minutes
+        {capped ? "Minutes used up" : "Call minutes"}
       </h2>
       <p role="status" aria-live="polite">
-        {usage.plainSummary} Calls are not cut off mid-email — overage is
-        metered.
+        {usage.plainSummary}
         {showWarn ? ` ${usage.spokenWarning}` : ""}
       </p>
+      <Link
+        href="/dashboard/billing#minute-packs"
+        className="btn-primary call-minute-usage-banner__cta"
+      >
+        Buy more minutes
+      </Link>
     </aside>
   );
 }

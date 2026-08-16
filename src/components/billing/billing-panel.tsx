@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { CallMinuteUsage } from "@/lib/billing/call-usage";
 import type { PlanEntitlements } from "@/lib/billing/entitlements";
-import { formatOverageRate, formatPlanPrice, plans } from "@/lib/plans";
+import { formatPlanPrice, MINUTE_PACKS, plans } from "@/lib/plans";
 import { product } from "@/lib/product";
 
 type SubscriptionSummary = {
@@ -18,9 +18,10 @@ type SubscriptionSummary = {
 
 export function BillingPanel() {
   const [status, setStatus] = useState(
-    "Review your plan. Included call minutes are metered — never unlimited.",
+    "Review your plan. Included minutes reset each period; purchased minutes roll over until used.",
   );
   const [busyPlan, setBusyPlan] = useState<string | null>(null);
+  const [busyPack, setBusyPack] = useState<string | null>(null);
   const [usage, setUsage] = useState<CallMinuteUsage | null>(null);
   const [organizationId, setOrganizationId] = useState<string | null>(null);
   const [isOperator, setIsOperator] = useState(false);
@@ -100,7 +101,7 @@ export function BillingPanel() {
         return;
       }
       if (data.url && !data.stub) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
         return;
       }
       setStatus(
@@ -115,6 +116,56 @@ export function BillingPanel() {
       setStatus("Network error starting checkout.");
     } finally {
       setBusyPlan(null);
+    }
+  }
+
+  async function buyMinutePack(minutePackKey: string) {
+    setBusyPack(minutePackKey);
+    setStatus("Starting secure checkout for additional minutes…");
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organizationId: organizationId ?? undefined,
+          minutePackKey,
+          successUrl: `${window.location.origin}/dashboard/billing?minutes=success`,
+          cancelUrl: `${window.location.origin}/dashboard/billing?minutes=cancel`,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        reason?: string;
+        url?: string;
+        stub?: boolean;
+        message?: string;
+        error?: string;
+      };
+      if (data.reason === "stripe_not_configured") {
+        setStatus(
+          isOperator
+            ? (data.message ??
+                "Billing not live — set STRIPE_SECRET_KEY and STRIPE_PRICE_MINUTES_30 / _60 / _120.")
+            : (data.message ??
+                "Buying minutes is not available yet. Please contact support."),
+        );
+        return;
+      }
+      if (data.url && !data.stub) {
+        window.location.assign(data.url);
+        return;
+      }
+      setStatus(
+        data.message ??
+          data.error ??
+          (res.ok
+            ? "Minute-pack checkout is almost ready."
+            : "Could not start checkout."),
+      );
+    } catch {
+      setStatus("Network error starting minute-pack checkout.");
+    } finally {
+      setBusyPack(null);
     }
   }
 
@@ -137,7 +188,7 @@ export function BillingPanel() {
         error?: string;
       };
       if (data.url) {
-        window.location.href = data.url;
+        window.location.assign(data.url);
         return;
       }
       if (data.reason === "stripe_not_configured") {
@@ -165,8 +216,9 @@ export function BillingPanel() {
         <h1>Billing</h1>
         <p>
           Manage your {product.name} subscription. Plans use included call-in
-          minutes with a clear overage rate — never unlimited. You can cancel or
-          update your card any time.
+          minutes first, then any prepaid minutes you have purchased. Prepaid
+          minutes roll over until used. Call-in pauses only when both balances
+          are empty. You can cancel or update your card any time.
         </p>
       </header>
 
@@ -227,13 +279,43 @@ export function BillingPanel() {
         >
           <h2 id="billing-usage-heading">Call minutes this period</h2>
           <p role="status" aria-live="polite">
-            {usage.plainSummary} Plan: {usage.planName}. Soft cap — you can keep
-            calling; overage is metered at{" "}
-            {formatOverageRate(usage.overageRateUsdPerMinute)}.
+            {usage.plainSummary} Plan: {usage.planName}. Included remaining:{" "}
+            {usage.minutesRemaining}. Purchased remaining:{" "}
+            {usage.purchasedMinutesRemaining}.
             {usage.warningLevel !== "none" ? ` ${usage.spokenWarning}` : ""}
           </p>
         </section>
       ) : null}
+
+      <section
+        id="minute-packs"
+        className="billing-usage"
+        aria-labelledby="minute-packs-heading"
+      >
+        <h2 id="minute-packs-heading">Buy more minutes</h2>
+        <p>
+          One-time prepaid packs. Included plan minutes are used first; these
+          minutes roll over until you use them.
+        </p>
+        <ul className="billing-plan-list">
+          {MINUTE_PACKS.map((pack) => (
+            <li key={pack.id} className="billing-plan-card">
+              <h3>{pack.label}</h3>
+              <p className="billing-plan-price">${pack.priceUsd} one time</p>
+              <p>{pack.description}</p>
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={busyPack !== null}
+                onClick={() => void buyMinutePack(pack.id)}
+                aria-label={`Buy ${pack.minutes} additional call minutes for $${pack.priceUsd}`}
+              >
+                {busyPack === pack.id ? "Starting…" : `Buy ${pack.label}`}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <div className="billing-actions">
         <Link href="/pricing" className="btn-secondary">
@@ -261,12 +343,12 @@ export function BillingPanel() {
               {plan.callLimits.includedCallMinutes != null ? (
                 <p className="billing-plan-minutes">
                   Includes {plan.callLimits.includedCallMinutes} minutes ·
-                  overage{" "}
-                  {formatOverageRate(plan.callLimits.overagePerMinuteUsd ?? 0.6)}
+                  then uses prepaid minutes (buy more, upgrade, or wait for
+                  reset when both are empty)
                 </p>
               ) : (
                 <p className="billing-plan-minutes">
-                  Custom included minutes (still capped — no unlimited calling)
+                  Custom included minutes (hard-capped — no unlimited calling)
                 </p>
               )}
               <button

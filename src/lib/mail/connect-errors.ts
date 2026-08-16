@@ -39,6 +39,11 @@ export function humanizeMailboxConnectReason(reason: string): string {
         "Mailbox connect didn’t finish. Try Connect Gmail again. " +
         "If it still fails, contact support."
       );
+    case "needs_reconnect":
+    case "invalid_grant":
+      return (
+        "Your mailbox needs reconnecting. Tap Connect Gmail, approve access, then try again."
+      );
     default:
       return "Mailbox connection failed. You can try again.";
   }

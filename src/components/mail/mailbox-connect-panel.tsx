@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useId, useState } from "react";
-import { gmailConnectedSpoken } from "@/lib/a11y/copy";
+import { gmailConnectedSpoken, gmailNeedsReconnectSpoken } from "@/lib/a11y/copy";
+import { GOOGLE_TESTING_CONSENT_GUIDANCE } from "@/lib/google-oauth-publication";
 import { humanizeMailboxConnectReason } from "@/lib/mail/connect-errors";
 import { product } from "@/lib/product";
 
@@ -44,6 +45,7 @@ type MailStatusResponse = {
   oauth?: {
     gmail?: boolean;
     outlook?: boolean;
+    googleOauthPublished?: boolean;
     gmailMessage?: string | null;
     outlookMessage?: string | null;
   };
@@ -125,11 +127,19 @@ export function MailboxConnectPanel() {
           if (mailboxParam !== "connected") {
             const providerLabel =
               primary.provider === "gmail" ? "Gmail" : primary.provider;
-            setStatus(
-              primary.provider === "gmail"
-                ? `${gmailConnectedSpoken(primary.emailAddress)}${synced}`
-                : `${providerLabel} connected as ${primary.emailAddress}.${synced} Nothing sends without your approval.`,
-            );
+            const statusLower = (primary.connectionStatus ?? "").toLowerCase();
+            if (
+              primary.provider === "gmail" &&
+              (statusLower === "error" || statusLower === "disconnected")
+            ) {
+              setStatus(gmailNeedsReconnectSpoken(primary.emailAddress));
+            } else {
+              setStatus(
+                primary.provider === "gmail"
+                  ? `${gmailConnectedSpoken(primary.emailAddress)}${synced}`
+                  : `${providerLabel} connected as ${primary.emailAddress}.${synced} Nothing sends without your approval.`,
+              );
+            }
           }
         } else if (mailboxParam !== "connected" && mailboxParam !== "error") {
           setStatus(
@@ -259,10 +269,41 @@ export function MailboxConnectPanel() {
     }
   }
 
+  async function disconnectMailbox(mailbox: ConnectedMailbox) {
+    setBusy(true);
+    setStatus(`Disconnecting ${mailbox.emailAddress}…`);
+    try {
+      const res = await fetch("/api/mail/disconnect", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mailboxId: mailbox.id }),
+      });
+      const data = (await res.json()) as { ok?: boolean; message?: string };
+      if (!res.ok || !data.ok) {
+        setStatus(data.message ?? "Could not disconnect this mailbox.");
+        return;
+      }
+      setMailboxes((current) => current.filter((item) => item.id !== mailbox.id));
+      setStatus(
+        data.message ??
+          `${mailbox.emailAddress} is disconnected. Sync and call-in reading have stopped.`,
+      );
+    } catch {
+      setStatus("Could not disconnect this mailbox. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const isImapFamily =
     active === "yahoo" || active === "icloud" || active === "imap";
   const presetNotes =
     isImapFamily && presets?.[active] ? presets[active].notes : null;
+  const gmailNeedsReconnect = mailboxes.some(
+    (mailbox) =>
+      mailbox.provider === "gmail" &&
+      mailbox.connectionStatus.toLowerCase() !== "connected",
+  );
 
   return (
     <section
@@ -318,19 +359,25 @@ export function MailboxConnectPanel() {
         {active === "gmail" ? (
           <>
             <p>
-              Connect Google Workspace or personal Gmail via OAuth. Scopes:
-              read mail and send only after you approve a draft.
+              Connect Google Workspace or personal Gmail. Inbox Chief can read
+              your mail and can send only after you approve a draft.
             </p>
             {!oauth?.gmail ? (
               <p className="mailbox-connect__hint">
                 {humanizeMailboxConnectReason("gmail_not_configured")}
               </p>
             ) : (
-              <p className="mailbox-connect__hint">
-                You’ll approve access on Google’s secure screen. If Google
-                blocks the connection, ask your admin to enable your account,
-                then try again.
-              </p>
+              <>
+                <p className="mailbox-connect__hint">
+                  You’ll approve access on Google’s secure screen.
+                </p>
+                {oauth.googleOauthPublished === false ? (
+                  <p className="mailbox-connect__hint" role="note">
+                    <strong>Google notice:</strong>{" "}
+                    {GOOGLE_TESTING_CONSENT_GUIDANCE}
+                  </p>
+                ) : null}
+              </>
             )}
             <button
               type="button"
@@ -339,7 +386,11 @@ export function MailboxConnectPanel() {
               disabled={busy || !oauth?.gmail}
               aria-busy={busy}
             >
-              {busy ? "Connecting…" : "Connect Gmail"}
+              {busy
+                ? "Connecting…"
+                : gmailNeedsReconnect
+                  ? "Reconnect Gmail"
+                  : "Connect Gmail"}
             </button>
           </>
         ) : null}
@@ -480,6 +531,29 @@ export function MailboxConnectPanel() {
               {m.lastSyncedAt
                 ? ` · synced ${new Date(m.lastSyncedAt).toLocaleString()}`
                 : null}
+              {" "}
+              {m.provider === "gmail" &&
+              m.connectionStatus.toLowerCase() !== "connected" ? (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() => void connectOAuth("gmail")}
+                  aria-label={`Reconnect Gmail for ${m.emailAddress}`}
+                >
+                  Reconnect Gmail
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={busy || m.id === "local"}
+                  onClick={() => void disconnectMailbox(m)}
+                  aria-label={`Disconnect ${m.emailAddress}`}
+                >
+                  Disconnect
+                </button>
+              )}
             </li>
           ))}
         </ul>

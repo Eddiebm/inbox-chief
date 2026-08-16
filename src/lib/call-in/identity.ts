@@ -1,6 +1,7 @@
 import {
   demoMailboxSnapshot,
   mailboxNotConnectedSnapshot,
+  mailboxNeedsReconnectSnapshot,
   speakEmptyPrimaryInbox,
   unrecognizedCallerSnapshot,
   type CallInMailboxSnapshot,
@@ -10,10 +11,14 @@ import {
   type MessageRowForCallIn,
 } from "@/lib/call-in/attachment-enrichment";
 import {
-  filterMessagesByInboxScope,
-  isPrimaryInboxMessage,
-} from "@/lib/call-in/primary-inbox";
+  loadNewPrimaryCount,
+  speakNewPrimaryCount,
+} from "@/lib/call-in/new-primary-count";
+import { filterMessagesByInboxScope } from "@/lib/call-in/primary-inbox";
+import { isGmailAuthFailure } from "@/lib/gmail/auth-errors";
 import { product } from "@/lib/product";
+import type { PrismaClient } from "@/generated/prisma/client";
+import { upsertDerivedContacts } from "@/lib/contacts";
 
 export type ResolvedCallInIdentity = {
   snapshot: CallInMailboxSnapshot;
@@ -26,28 +31,60 @@ export type ResolvedCallInIdentity = {
 };
 
 const STALE_SYNC_MS = 15 * 60 * 1000;
-/** Fetch enough messages so Primary filter still has a readable batch */
-const CALL_IN_MESSAGE_TAKE = 40;
+/**
+ * How many recent rows to classify per call. Bodies are NOT loaded here —
+ * a newsletter-heavy mailbox needs a wide window before Primary shows up.
+ */
+const CALL_IN_MESSAGE_SCAN_TAKE = 200;
+/** How many Primary messages the caller can walk through with "next" per call. */
+export const CALL_IN_READABLE_PRIMARY_LIMIT = 20;
+/** Opt-in "read promotions" depth. */
+const CALL_IN_READABLE_NON_PRIMARY_LIMIT = 10;
 
-const messageSelectForCallIn = {
+/** Classification pass: everything except the (large) message body. */
+const messageScanSelectForCallIn = {
   id: true,
   gmailId: true,
   subject: true,
   fromAddress: true,
   snippet: true,
-  bodyText: true,
   metadata: true,
   categoryName: true,
   receivedAt: true,
+  isRead: true,
 } as const;
 
-async function buildPrimaryScopedReadableEmails(input: {
-  messages: MessageRowForCallIn[];
+type ScannedMessageRow = {
+  id: string;
+  gmailId: string;
+  subject: string;
+  fromAddress: string;
+  snippet: string | null;
+  metadata: unknown;
+  categoryName: string | null;
+  receivedAt: Date;
+  isRead: boolean;
+};
+
+/** Structural subset used here so tests can pass a stub instead of a real client. */
+type PrismaLikeForCallIn = {
+  message: Pick<PrismaClient["message"], "findMany">;
+};
+
+/**
+ * Load the readable Primary window newest-first.
+ *
+ * Reads deliberately do NOT filter on needsAttention: unread is a triage hint,
+ * and gating on it collapsed the list to a single message whenever the newest
+ * unread mail was promotional.
+ */
+export async function loadCallInReadableWindow(input: {
+  prisma: PrismaLikeForCallIn;
+  tenantFilter: Record<string, string>;
   organizationId: string;
   workspaceId: string;
   mailboxId: string;
   userId: string;
-  fetchAttachmentBodies: boolean;
 }): Promise<{
   readableEmails: Awaited<ReturnType<typeof buildReadableEmailsWithAttachments>>;
   readableEmailsNonPrimary: Awaited<
@@ -55,21 +92,58 @@ async function buildPrimaryScopedReadableEmails(input: {
   >;
   skippedNonPrimaryCount: number;
   primaryMessageCount: number;
+  unreadPrimaryCount: number;
 }> {
-  const primary = filterMessagesByInboxScope(input.messages, "primary");
-  const nonPrimary = filterMessagesByInboxScope(input.messages, "promotions");
+  const scanned = (await input.prisma.message.findMany({
+    where: input.tenantFilter,
+    orderBy: { receivedAt: "desc" },
+    take: CALL_IN_MESSAGE_SCAN_TAKE,
+    select: messageScanSelectForCallIn,
+  })) as ScannedMessageRow[];
 
+  const primary = filterMessagesByInboxScope(scanned, "primary");
+  const nonPrimary = filterMessagesByInboxScope(scanned, "promotions");
+  const primaryRows = primary.kept.slice(0, CALL_IN_READABLE_PRIMARY_LIMIT);
+  const nonPrimaryRows = nonPrimary.kept.slice(
+    0,
+    CALL_IN_READABLE_NON_PRIMARY_LIMIT,
+  );
+
+  // Bodies only for what can actually be spoken this call.
+  const bodyIds = [...primaryRows, ...nonPrimaryRows].map((m) => m.id);
+  const bodies = bodyIds.length
+    ? ((await input.prisma.message.findMany({
+        where: { ...input.tenantFilter, id: { in: bodyIds } },
+        select: { id: true, bodyText: true },
+      })) as Array<{ id: string; bodyText: string | null }>)
+    : [];
+  const bodyById = new Map(bodies.map((row) => [row.id, row.bodyText]));
+
+  const withBody = (rows: ScannedMessageRow[]): MessageRowForCallIn[] =>
+    rows.map((m) => ({
+      id: m.id,
+      gmailId: m.gmailId,
+      fromAddress: m.fromAddress,
+      subject: m.subject,
+      snippet: m.snippet,
+      bodyText: bodyById.get(m.id) ?? null,
+      metadata: m.metadata,
+      categoryName: m.categoryName,
+      receivedAt: m.receivedAt,
+    }));
+
+  // Attachment bytes are fetched lazily, per email, as the caller says "next".
   const [readableEmails, readableEmailsNonPrimary] = await Promise.all([
     buildReadableEmailsWithAttachments({
-      messages: primary.kept.slice(0, 8),
+      messages: withBody(primaryRows),
       organizationId: input.organizationId,
       workspaceId: input.workspaceId,
       mailboxId: input.mailboxId,
       userId: input.userId,
-      fetchAttachmentBodies: input.fetchAttachmentBodies,
+      fetchAttachmentBodies: false,
     }),
     buildReadableEmailsWithAttachments({
-      messages: nonPrimary.kept.slice(0, 8),
+      messages: withBody(nonPrimaryRows),
       organizationId: input.organizationId,
       workspaceId: input.workspaceId,
       mailboxId: input.mailboxId,
@@ -83,6 +157,7 @@ async function buildPrimaryScopedReadableEmails(input: {
     readableEmailsNonPrimary,
     skippedNonPrimaryCount: primary.skippedNonPrimaryCount,
     primaryMessageCount: primary.kept.length,
+    unreadPrimaryCount: primary.kept.filter((m) => !m.isRead).length,
   };
 }
 
@@ -251,6 +326,17 @@ export async function resolveSnapshotForCaller(
     let connectionStatus = mapConnectionStatus(mailbox?.connectionStatus);
     const mailboxEmail = mailbox?.emailAddress ?? user?.email ?? "your mailbox";
 
+    if (connectionStatus === "error") {
+      return {
+        snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+        matched: true,
+        phoneE164,
+        callInIdentityId: identity.id,
+        userId: identity.userId,
+        source: "call_in_identity",
+      };
+    }
+
     // Connected mailbox with no/stale sync → refresh real Gmail before speaking.
     if (
       mailbox?.id &&
@@ -265,16 +351,38 @@ export async function resolveSnapshotForCaller(
         try {
           connectionStatus = "syncing";
           const { syncMailbox } = await import("@/lib/gmail/client");
-          await syncMailbox({
+          const syncResult = await syncMailbox({
             organizationId: identity.organizationId,
             workspaceId: identity.workspaceId,
             mailboxId: mailbox.id,
             userId: identity.userId,
-            maxResults: 25,
+            suppressOutboundAlert: true,
           });
-          connectionStatus = "connected";
+          if (!syncResult.ok && needsReconnectReason(syncResult.reason)) {
+            return {
+              snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+              matched: true,
+              phoneE164,
+              callInIdentityId: identity.id,
+              userId: identity.userId,
+              source: "call_in_identity",
+            };
+          }
+          connectionStatus = syncResult.ok
+            ? "connected"
+            : mapConnectionStatus(mailbox.connectionStatus);
         } catch (syncErr) {
           console.warn("[call-in] mailbox sync during resolve failed", syncErr);
+          if (isGmailAuthFailure(syncErr)) {
+            return {
+              snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+              matched: true,
+              phoneE164,
+              callInIdentityId: identity.id,
+              userId: identity.userId,
+              source: "call_in_identity",
+            };
+          }
           connectionStatus = mapConnectionStatus(mailbox.connectionStatus);
         }
       }
@@ -300,35 +408,6 @@ export async function resolveSnapshotForCaller(
         }),
       ]);
 
-    // Prefer needs-attention Primary; if none flagged, read recent Primary (never demo).
-    let recent = await prisma.message.findMany({
-      where: { ...tenantFilter, needsAttention: true },
-      orderBy: { receivedAt: "desc" },
-      take: CALL_IN_MESSAGE_TAKE,
-      select: messageSelectForCallIn,
-    });
-
-    if (recent.length === 0) {
-      recent = await prisma.message.findMany({
-        where: tenantFilter,
-        orderBy: { receivedAt: "desc" },
-        take: CALL_IN_MESSAGE_TAKE,
-        select: messageSelectForCallIn,
-      });
-    }
-
-    // If needs-attention set had no Primary after filter, fall back to recent Primary
-    const attentionPrimary = recent.filter(isPrimaryInboxMessage);
-    if (attentionPrimary.length === 0) {
-      const fallback = await prisma.message.findMany({
-        where: tenantFilter,
-        orderBy: { receivedAt: "desc" },
-        take: CALL_IN_MESSAGE_TAKE,
-        select: messageSelectForCallIn,
-      });
-      if (fallback.length > 0) recent = fallback;
-    }
-
     const briefing = await prisma.dailyBriefing.findFirst({
       where: {
         organizationId: identity.organizationId,
@@ -346,19 +425,29 @@ export async function resolveSnapshotForCaller(
           ? `${product.name} is syncing ${mailboxEmail}. Ask again in a moment for your real inbox.`
           : `${product.name} mailbox connection is ${connectionStatus}. Link email in Settings when ready.`;
 
-    const scoped = await buildPrimaryScopedReadableEmails({
-      messages: recent,
+    const scoped = await loadCallInReadableWindow({
+      prisma,
+      tenantFilter,
       organizationId: identity.organizationId,
       workspaceId: identity.workspaceId,
       mailboxId: mailbox?.id ?? mailboxId,
       userId: identity.userId,
-      fetchAttachmentBodies: connectionStatus === "connected",
     });
+    await upsertDerivedContacts({
+      prisma,
+      organizationId: identity.organizationId,
+      workspaceId: identity.workspaceId,
+      mailboxId: mailbox?.id ?? mailboxId,
+      addresses: [...scoped.readableEmails, ...scoped.readableEmailsNonPrimary],
+    });
+    const newPrimaryCount = await loadNewPrimaryCount({
+      prisma,
+      tenantFilter,
+      since: identity.lastSuccessfulCallAt,
+    });
+    const isFirstSuccessfulCall = identity.lastSuccessfulCallAt == null;
 
-    const attentionCount =
-      scoped.primaryMessageCount > 0
-        ? scoped.readableEmails.length
-        : scoped.readableEmails.length;
+    const attentionCount = scoped.unreadPrimaryCount;
 
     const snapshot: CallInMailboxSnapshot = {
       organizationId: identity.organizationId,
@@ -379,13 +468,23 @@ export async function resolveSnapshotForCaller(
           ? connectionStatus === "connected"
             ? speakEmptyPrimaryInbox(scoped.skippedNonPrimaryCount)
             : `Mailbox status: ${connectionStatus}.`
-          : `${attentionCount} Primary message${attentionCount === 1 ? "" : "s"} to read. I will read each: from, subject, the text, then any attachments I can read.`),
+          : speakReadableInboxDepth(
+              scoped.readableEmails.length,
+              attentionCount,
+            )),
       recentSubjects: scoped.readableEmails.map((m) => m.subject).filter(Boolean),
       readableEmails: scoped.readableEmails,
       readableEmailsNonPrimary: scoped.readableEmailsNonPrimary,
       skippedNonPrimaryCount: scoped.skippedNonPrimaryCount,
       securityNote,
       matchedPhoneE164: identity.phoneE164,
+      newPrimaryCount,
+      lastSuccessfulCallAt: identity.lastSuccessfulCallAt?.toISOString() ?? null,
+      isFirstSuccessfulCall,
+      newPrimaryAnnouncement: speakNewPrimaryCount({
+        count: newPrimaryCount,
+        isFirstCall: isFirstSuccessfulCall,
+      }),
     };
 
     return {
@@ -474,6 +573,10 @@ export async function resolveSnapshotForUser(
 
     let connectionStatus = mapConnectionStatus(mailbox.connectionStatus);
 
+    if (connectionStatus === "error") {
+      return mailboxNeedsReconnectSnapshot(firstName, mailbox.emailAddress);
+    }
+
     if (
       connectionStatus === "connected" &&
       (mailbox.provider ?? "gmail") === "gmail"
@@ -486,22 +589,36 @@ export async function resolveSnapshotForUser(
         try {
           connectionStatus = "syncing";
           const { syncMailbox } = await import("@/lib/gmail/client");
-          await syncMailbox({
+          const syncResult = await syncMailbox({
             organizationId: scope.organizationId,
             workspaceId: scope.workspaceId,
             mailboxId: mailbox.id,
             userId,
-            maxResults: 25,
+            suppressOutboundAlert: true,
           });
-          connectionStatus = "connected";
+          if (!syncResult.ok && needsReconnectReason(syncResult.reason)) {
+            return mailboxNeedsReconnectSnapshot(
+              firstName,
+              mailbox.emailAddress,
+            );
+          }
+          connectionStatus = syncResult.ok
+            ? "connected"
+            : mapConnectionStatus(mailbox.connectionStatus);
         } catch (syncErr) {
           console.warn("[call-in] web ask mailbox sync failed", syncErr);
+          if (isGmailAuthFailure(syncErr)) {
+            return mailboxNeedsReconnectSnapshot(
+              firstName,
+              mailbox.emailAddress,
+            );
+          }
           connectionStatus = mapConnectionStatus(mailbox.connectionStatus);
         }
       }
     }
 
-    const [draftsAwaitingReview, approvalsPending, followUpsDue, attentionMsgs, recentFallback] =
+    const [draftsAwaitingReview, approvalsPending, followUpsDue, scoped] =
       await Promise.all([
         prisma.draft.count({
           where: {
@@ -519,32 +636,25 @@ export async function resolveSnapshotForUser(
             dueAt: { lte: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) },
           },
         }),
-        prisma.message.findMany({
-          where: { ...tenantFilter, needsAttention: true },
-          orderBy: { receivedAt: "desc" },
-          take: CALL_IN_MESSAGE_TAKE,
-          select: messageSelectForCallIn,
-        }),
-        prisma.message.findMany({
-          where: tenantFilter,
-          orderBy: { receivedAt: "desc" },
-          take: CALL_IN_MESSAGE_TAKE,
-          select: messageSelectForCallIn,
+        loadCallInReadableWindow({
+          prisma,
+          tenantFilter,
+          organizationId: scope.organizationId,
+          workspaceId: scope.workspaceId,
+          mailboxId: mailbox.id,
+          userId,
         }),
       ]);
 
-    const attentionPrimary = attentionMsgs.filter(isPrimaryInboxMessage);
-    const recent =
-      attentionPrimary.length > 0 ? attentionMsgs : recentFallback;
-    const scoped = await buildPrimaryScopedReadableEmails({
-      messages: recent,
+    const attentionCount = scoped.unreadPrimaryCount;
+
+    await upsertDerivedContacts({
+      prisma,
       organizationId: scope.organizationId,
       workspaceId: scope.workspaceId,
       mailboxId: mailbox.id,
-      userId,
-      fetchAttachmentBodies: connectionStatus === "connected",
+      addresses: [...scoped.readableEmails, ...scoped.readableEmailsNonPrimary],
     });
-    const attentionCount = scoped.readableEmails.length;
 
     return {
       organizationId: scope.organizationId,
@@ -564,7 +674,10 @@ export async function resolveSnapshotForUser(
           ? connectionStatus === "connected"
             ? speakEmptyPrimaryInbox(scoped.skippedNonPrimaryCount)
             : `Mailbox status: ${connectionStatus}.`
-          : `${attentionCount} Primary message${attentionCount === 1 ? "" : "s"} to read. I will read each: from, subject, the text, then any attachments I can read.`,
+          : speakReadableInboxDepth(
+              scoped.readableEmails.length,
+              attentionCount,
+            ),
       recentSubjects: scoped.readableEmails.map((m) => m.subject).filter(Boolean),
       readableEmails: scoped.readableEmails,
       readableEmailsNonPrimary: scoped.readableEmailsNonPrimary,
@@ -575,6 +688,22 @@ export async function resolveSnapshotForUser(
     console.warn("[call-in] resolveSnapshotForUser failed", err);
     return mailboxNotConnectedSnapshot(preferredName ?? "there");
   }
+}
+
+/** Sync failures that mean the patron must reconnect Gmail — never read stale mail. */
+export function needsReconnectReason(reason: string | undefined): boolean {
+  return reason === "needs_reconnect" || reason === "mailbox_token_missing";
+}
+
+/** Announce how many Primary messages the caller can walk through this call. */
+export function speakReadableInboxDepth(
+  readableCount: number,
+  unreadCount: number,
+): string {
+  const plural = readableCount === 1 ? "" : "s";
+  const unreadPart =
+    unreadCount > 0 ? ` ${unreadCount} of them ${unreadCount === 1 ? "is" : "are"} unread.` : "";
+  return `${readableCount} Primary message${plural} ready to read.${unreadPart} I read them one at a time — from, subject, when it arrived, the full text, then any attachments. Say continue for the rest of a long message, or next at any time for the following email.`;
 }
 
 function mapConnectionStatus(

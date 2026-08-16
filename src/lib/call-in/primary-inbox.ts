@@ -13,6 +13,8 @@ export type GmailInboxTab =
   | "updates"
   | "forums"
   | "spam"
+  /** Sent, drafts, chats, or archived mail — never read on a call-in. */
+  | "not_inbox"
   | "unknown";
 
 export type CallInInboxScope = "primary" | "promotions" | "everything";
@@ -48,6 +50,8 @@ export function categoryNameFromGmailLabels(
 ): string | null {
   const ids = labelIds ?? [];
   if (ids.includes("SPAM")) return "SPAM";
+  // Sent / draft / chat / archived: keep it out of the readable inbox scopes.
+  if (ids.length > 0 && !ids.includes("INBOX")) return "NOT_INBOX";
   if (ids.includes("CATEGORY_PROMOTIONS")) return "PROMOTIONS";
   if (ids.includes("CATEGORY_SOCIAL")) return "SOCIAL";
   if (ids.includes("CATEGORY_UPDATES")) return "UPDATES";
@@ -78,11 +82,14 @@ export function inboxTabFromCategoryName(
   if (c === "UPDATES") return "updates";
   if (c === "FORUMS") return "forums";
   if (c === "SPAM" || c === "JUNK") return "spam";
+  if (c === "NOT_INBOX" || c === "SENT" || c === "DRAFT") return "not_inbox";
   return null;
 }
 
 export function inboxTabFromLabelIds(labelIds: string[]): GmailInboxTab {
   if (labelIds.includes("SPAM") || labelIds.includes("TRASH")) return "spam";
+  // Sent / drafts / chats and archived mail are not inbox reading material.
+  if (!labelIds.includes("INBOX")) return "not_inbox";
   if (labelIds.includes("CATEGORY_PROMOTIONS")) return "promotions";
   if (labelIds.includes("CATEGORY_SOCIAL")) return "social";
   if (labelIds.includes("CATEGORY_UPDATES")) return "updates";
@@ -196,39 +203,42 @@ export function filterMessagesByInboxScope<T extends MessageLikeForPrimaryFilter
 ): { kept: T[]; skipped: T[]; skippedNonPrimaryCount: number } {
   const kept: T[] = [];
   const skipped: T[] = [];
+  /** Sent/draft/archived rows are not inbox mail, so they are never announced. */
+  let skippedInboxCount = 0;
 
   for (const m of messages) {
     const tab = resolveInboxTab(m);
+    const isInboxMail = tab !== "not_inbox";
+
     if (scope === "primary") {
-      if (tab === "primary") kept.push(m);
-      else skipped.push(m);
+      if (tab === "primary") {
+        kept.push(m);
+      } else {
+        skipped.push(m);
+        if (isInboxMail) skippedInboxCount += 1;
+      }
       continue;
     }
     if (scope === "promotions") {
-      // Explicit non-primary tabs (not spam unless they asked junk/spam — covered by "promotions" scope including junk)
-      if (tab === "spam" || tab === "primary") skipped.push(m);
-      else kept.push(m);
+      // Other Gmail tabs only — never spam, primary, or non-inbox mail.
+      if (tab === "spam" || tab === "primary" || tab === "not_inbox") {
+        skipped.push(m);
+        if (isInboxMail) skippedInboxCount += 1;
+      } else {
+        kept.push(m);
+      }
       continue;
     }
-    // everything: all tabs except hard spam/trash
-    if (tab === "spam") skipped.push(m);
-    else kept.push(m);
+    // everything: all tabs except hard spam/trash and non-inbox mail
+    if (tab === "spam" || tab === "not_inbox") {
+      skipped.push(m);
+      if (isInboxMail) skippedInboxCount += 1;
+    } else {
+      kept.push(m);
+    }
   }
 
-  const skippedNonPrimaryCount =
-    scope === "primary"
-      ? skipped.filter((m) => resolveInboxTab(m) !== "spam").length +
-        skipped.filter((m) => resolveInboxTab(m) === "spam").length
-      : skipped.length;
-
-  return {
-    kept,
-    skipped,
-    skippedNonPrimaryCount:
-      scope === "primary"
-        ? messages.length - kept.length
-        : skippedNonPrimaryCount,
-  };
+  return { kept, skipped, skippedNonPrimaryCount: skippedInboxCount };
 }
 
 /** Plain-language intro for TTS when reading Primary by default. */
@@ -243,8 +253,9 @@ export function speakPrimaryInboxIntro(input: {
   if (input.scope === "promotions") {
     return `Reading promotions and other non-primary tabs. ${input.keptCount} message${input.keptCount === 1 ? "" : "s"}.`;
   }
+  const kept = `${input.keptCount} message${input.keptCount === 1 ? "" : "s"} to read, one at a time`;
   if (input.skippedCount > 0) {
-    return `Reading your primary inbox. Skipping ${input.skippedCount} promotional and other-tab message${input.skippedCount === 1 ? "" : "s"}. Reading ${input.keptCount} that need attention.`;
+    return `Reading your primary inbox. Skipping ${input.skippedCount} promotional and other-tab message${input.skippedCount === 1 ? "" : "s"}. ${kept}.`;
   }
-  return `Reading your primary inbox. ${input.keptCount} message${input.keptCount === 1 ? "" : "s"} that need attention.`;
+  return `Reading your primary inbox. ${kept}.`;
 }

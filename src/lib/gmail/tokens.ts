@@ -81,10 +81,20 @@ export async function getDecryptedMailboxTokensForTenant(
 } | null> {
   const token = await getMailboxOAuthTokenForTenant(scope);
   if (!token) return null;
-  return {
-    accessToken: decryptSecret(token.accessTokenEnc),
-    refreshToken: decryptSecret(token.refreshTokenEnc),
-    expiresAt: token.expiresAt,
-    scopes: token.scopes,
-  };
+  try {
+    return {
+      accessToken: decryptSecret(token.accessTokenEnc),
+      refreshToken: decryptSecret(token.refreshTokenEnc),
+      expiresAt: token.expiresAt,
+      scopes: token.scopes,
+    };
+  } catch (error) {
+    // A token we cannot decrypt (rotated key) is unusable. Report it as missing
+    // so callers ask the patron to reconnect instead of reading stale mail.
+    console.warn("[gmail] mailbox token decrypt failed; treating as missing", {
+      mailboxId: scope.mailboxId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
 }

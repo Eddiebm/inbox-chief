@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { callInReadinessFromEnv } from "@/lib/call-in/vapi-errors";
 import { isGmailOAuthConfigured } from "@/lib/gmail/config";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 
 export const runtime = "nodejs";
 
@@ -41,7 +42,7 @@ export async function GET() {
   const checks = {
     database,
     gmailOauthConfigured: gmailOauth,
-    googleOauthPublished: process.env.GOOGLE_OAUTH_PUBLISHED === "true",
+    googleOauthPublished: isGoogleOauthPublished(),
     vapiNumberConfigured: vapi.numberConfigured,
     vapiAssistantLinked: vapi.assistantLinked,
     stripe: {

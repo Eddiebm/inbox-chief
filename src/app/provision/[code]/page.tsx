@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import {
+  googleConsentGuidance,
+  isGoogleOauthPublished,
+} from "@/lib/google-oauth-publication";
 import { findProvisioningByCode } from "@/lib/provisioning";
 
 export const metadata: Metadata = {
@@ -35,8 +39,12 @@ export default async function ProvisionPage({
     );
   }
 
+  const googleOauthPublished = isGoogleOauthPublished();
   const waiting =
-    provision.needsGoogleTestUser && !provision.googleTestUserEnabled;
+    !googleOauthPublished &&
+    provision.needsGoogleTestUser &&
+    !provision.googleTestUserEnabled;
+  const testingGuidance = googleConsentGuidance(googleOauthPublished);
 
   return (
     <main className="auth-page">
@@ -62,11 +70,12 @@ export default async function ProvisionPage({
         ) : waiting ? (
           <>
             <p role="status" aria-live="polite">
-              Your operator is enabling Gmail access. Return to this page after
-              they confirm it; your account and phone are already saved.
+              Inbox Chief support needs to enable this Gmail address once. You
+              do not need to change any Google settings. Your account and phone
+              are already saved; return to this same link after support confirms.
             </p>
             {query.reason === "operator_pending" ? (
-              <p>The connection link is ready, but operator approval is still pending.</p>
+              <p>Your private connection link is ready and remains valid for 24 hours.</p>
             ) : null}
           </>
         ) : (
@@ -75,11 +84,16 @@ export default async function ProvisionPage({
               The next page is Google. Choose this Gmail account and approve
               read access. Inbox Chief never sends email automatically.
             </p>
+            {testingGuidance ? (
+              <p role="note">
+                <strong>Google notice:</strong> {testingGuidance}
+              </p>
+            ) : null}
             <a
               className="btn-primary"
               href={`/api/provision/connect?code=${encodeURIComponent(provision.shortCode)}`}
             >
-              Continue to Google
+              Connect Gmail
             </a>
           </>
         )}

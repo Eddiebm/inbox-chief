@@ -133,53 +133,56 @@ enum AuditAction {
 }
 
 model Organization {
-  id          String   @id @default(cuid())
+  id          String      @id @default(cuid())
   name        String
-  slug        String   @unique
+  slug        String      @unique
   accountType AccountType @default(INDIVIDUAL)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
-  workspaces      Workspace[]
-  members         OrganizationMember[]
-  subscriptions   Subscription[]
-  invitations     Invitation[]
-  usageRecords    UsageRecord[]
-  supportRequests SupportRequest[]
-  deletionRequests AccountDeletionRequest[]
-  dataExports     DataExportRequest[]
+  workspaces           Workspace[]
+  members              OrganizationMember[]
+  subscriptions        Subscription[]
+  invitations          Invitation[]
+  usageRecords         UsageRecord[]
+  supportRequests      SupportRequest[]
+  deletionRequests     AccountDeletionRequest[]
+  dataExports          DataExportRequest[]
   assistantEngagements AssistantEngagement[]
   attachmentDeliveries AttachmentDelivery[]
+  calendarConnections  CalendarConnection[]
+  contacts             Contact[]
 }
 
 model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String?
-  firstName    String
-  lastName     String   @default("")
+  id            String   @id @default(cuid())
+  email         String   @unique
+  passwordHash  String?
+  firstName     String
+  lastName      String   @default("")
   preferredName String?
-  occupation   String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  occupation    String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  memberships          OrganizationMember[]
-  ownedMailboxes       Mailbox[]              @relation("MailboxOwner")
-  createdMailboxes     Mailbox[]              @relation("MailboxCreatedBy")
-  accessibilityPrefs   AccessibilityPreference?
-  consents             ConsentRecord[]
-  mailboxPermissions   MailboxPermission[]
-  invitationsSent      Invitation[]           @relation("InvitationInviter")
-  invitationsAccepted  Invitation[]           @relation("InvitationAccepter")
-  auditEvents          AuditLog[]
-  supportRequests      SupportRequest[]
-  assistantProfile     AssistantProfile?
-  engagementsAsAssistant AssistantEngagement[] @relation("EngagementAssistant")
-  engagementsAsOwner   AssistantEngagement[]  @relation("EngagementOwner")
-  dataExports          DataExportRequest[]
-  deletionRequests     AccountDeletionRequest[]
-  sessions             Session[]
-  attachmentDeliveries AttachmentDelivery[]
+  memberships            OrganizationMember[]
+  ownedMailboxes         Mailbox[]                @relation("MailboxOwner")
+  createdMailboxes       Mailbox[]                @relation("MailboxCreatedBy")
+  accessibilityPrefs     AccessibilityPreference?
+  consents               ConsentRecord[]
+  mailboxPermissions     MailboxPermission[]
+  invitationsSent        Invitation[]             @relation("InvitationInviter")
+  invitationsAccepted    Invitation[]             @relation("InvitationAccepter")
+  auditEvents            AuditLog[]
+  supportRequests        SupportRequest[]
+  assistantProfile       AssistantProfile?
+  engagementsAsAssistant AssistantEngagement[]    @relation("EngagementAssistant")
+  engagementsAsOwner     AssistantEngagement[]    @relation("EngagementOwner")
+  dataExports            DataExportRequest[]
+  deletionRequests       AccountDeletionRequest[]
+  sessions               Session[]
+  attachmentDeliveries   AttachmentDelivery[]
+  calendarConnections    CalendarConnection[]
 }
 
 model Session {
@@ -200,23 +203,25 @@ model Workspace {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  mailboxes        Mailbox[]
-  categories       Category[]
-  triageRules      TriageRule[]
-  protectedContacts ProtectedContact[]
-  retentionPolicies RetentionPolicy[]
-  followUpRules    FollowUpRule[]
-  auditLogs        AuditLog[]
-  industryTemplate IndustryTemplate? @relation(fields: [industryTemplateId], references: [id])
-  industryTemplateId String?
-  invitations      Invitation[]
-  voiceProfiles    VoiceProfile[]
-  briefs           DailyBriefing[]
-  messages         Message[]
-  drafts           Draft[]
-  followUps        FollowUp[]
+  organization         Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mailboxes            Mailbox[]
+  categories           Category[]
+  triageRules          TriageRule[]
+  protectedContacts    ProtectedContact[]
+  retentionPolicies    RetentionPolicy[]
+  followUpRules        FollowUpRule[]
+  auditLogs            AuditLog[]
+  industryTemplate     IndustryTemplate?    @relation(fields: [industryTemplateId], references: [id])
+  industryTemplateId   String?
+  invitations          Invitation[]
+  voiceProfiles        VoiceProfile[]
+  briefs               DailyBriefing[]
+  messages             Message[]
+  drafts               Draft[]
+  followUps            FollowUp[]
   attachmentDeliveries AttachmentDelivery[]
+  calendarConnections  CalendarConnection[]
+  contacts             Contact[]
 
   @@index([organizationId])
 }
@@ -237,10 +242,10 @@ model OrganizationMember {
 }
 
 model Role {
-  id          String  @id @default(cuid())
-  key         String  @unique
-  name        String
-  description String?
+  id                           String  @id @default(cuid())
+  key                          String  @unique
+  name                         String
+  description                  String?
   /// Technical administrators must not receive mailbox access automatically
   grantsMailboxAccessByDefault Boolean @default(true)
 
@@ -270,34 +275,35 @@ model RolePermission {
 }
 
 model Mailbox {
-  id             String   @id @default(cuid())
-  organizationId String
-  workspaceId    String
-  ownerId        String
-  createdById    String
-  emailAddress   String
-  displayName    String?
-  provider       String   @default("gmail")
-  gmailHistoryId String?
-  syncCursor     String?
-  connectionStatus String  @default("disconnected")
-  lastSyncedAt   DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id               String    @id @default(cuid())
+  organizationId   String
+  workspaceId      String
+  ownerId          String
+  createdById      String
+  emailAddress     String
+  displayName      String?
+  provider         String    @default("gmail")
+  gmailHistoryId   String?
+  syncCursor       String?
+  connectionStatus String    @default("disconnected")
+  lastSyncedAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  owner       User      @relation("MailboxOwner", fields: [ownerId], references: [id])
-  createdBy   User      @relation("MailboxCreatedBy", fields: [createdById], references: [id])
-  oauthToken       MailboxOAuthToken?
-  imapCredentials  MailboxImapCredentials?
-  permissions      MailboxPermission[]
-  voiceProfile     VoiceProfile?
-  messages         Message[]
-  drafts           Draft[]
-  followUps        FollowUp[]
-  auditLogs        AuditLog[]
-  engagements      AssistantEngagement[]
+  workspace            Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  owner                User                    @relation("MailboxOwner", fields: [ownerId], references: [id])
+  createdBy            User                    @relation("MailboxCreatedBy", fields: [createdById], references: [id])
+  oauthToken           MailboxOAuthToken?
+  imapCredentials      MailboxImapCredentials?
+  permissions          MailboxPermission[]
+  voiceProfile         VoiceProfile?
+  messages             Message[]
+  drafts               Draft[]
+  followUps            FollowUp[]
+  auditLogs            AuditLog[]
+  engagements          AssistantEngagement[]
   attachmentDeliveries AttachmentDelivery[]
+  contacts             Contact[]
 
   @@unique([workspaceId, emailAddress])
   @@index([organizationId])
@@ -305,17 +311,62 @@ model Mailbox {
   @@index([ownerId])
 }
 
-model MailboxOAuthToken {
+/// Optional Calendar-only OAuth grant. Kept separate from Gmail consent.
+model CalendarConnection {
+  id              String    @id @default(cuid())
+  organizationId  String
+  workspaceId     String
+  userId          String    @unique
+  googleEmail     String?
+  accessTokenEnc  String
+  refreshTokenEnc String
+  expiresAt       DateTime?
+  scopes          String[]
+  timeZone        String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, workspaceId, userId])
+}
+
+/// Address-book entry derived from already-synced mail. Nicknames are user-managed.
+model Contact {
   id             String   @id @default(cuid())
   organizationId String
   workspaceId    String
-  mailboxId      String   @unique
-  accessTokenEnc String
-  refreshTokenEnc String
-  expiresAt      DateTime?
-  scopes         String[]
+  mailboxId      String
+  email          String
+  displayName    String?
+  nickname       String?
+  messageCount   Int      @default(1)
+  lastSeenAt     DateTime
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mailbox      Mailbox      @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+
+  @@unique([mailboxId, email])
+  @@index([organizationId, workspaceId, mailboxId])
+  @@index([organizationId, workspaceId, nickname])
+}
+
+model MailboxOAuthToken {
+  id              String    @id @default(cuid())
+  organizationId  String
+  workspaceId     String
+  mailboxId       String    @unique
+  accessTokenEnc  String
+  refreshTokenEnc String
+  expiresAt       DateTime?
+  scopes          String[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   mailbox Mailbox @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
 
@@ -346,7 +397,7 @@ model MailboxImapCredentials {
 }
 
 model MailboxPermission {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   workspaceId    String
   mailboxId      String
@@ -354,7 +405,7 @@ model MailboxPermission {
   permissionId   String
   grantedById    String?
   expiresAt      DateTime?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   mailbox    Mailbox    @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
   user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -488,42 +539,42 @@ model AccountDeletionRequest {
 }
 
 model AssistantProfile {
-  id                      String   @id @default(cuid())
-  userId                  String   @unique
+  id                      String    @id @default(cuid())
+  userId                  String    @unique
   displayName             String
   bio                     String?
-  backgroundCheckStatus   String   @default("not_started")
+  backgroundCheckStatus   String    @default("not_started")
   confidentialitySignedAt DateTime?
   hourlyRateUsd           Int?
   monthlyRateUsd          Int?
-  createdAt               DateTime @default(now())
-  updatedAt               DateTime @updatedAt
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   user        User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
   engagements AssistantEngagement[]
 }
 
 model AssistantEngagement {
-  id                 String           @id @default(cuid())
-  organizationId     String
-  workspaceId        String?
-  mailboxId          String?
-  ownerId            String
-  assistantUserId    String
-  assistantProfileId String?
-  status             EngagementStatus @default(PENDING)
-  requiresOwnerApproval Boolean       @default(true)
-  startsAt           DateTime?
-  endsAt             DateTime?
-  revokedAt          DateTime?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
+  id                    String           @id @default(cuid())
+  organizationId        String
+  workspaceId           String?
+  mailboxId             String?
+  ownerId               String
+  assistantUserId       String
+  assistantProfileId    String?
+  status                EngagementStatus @default(PENDING)
+  requiresOwnerApproval Boolean          @default(true)
+  startsAt              DateTime?
+  endsAt                DateTime?
+  revokedAt             DateTime?
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
-  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  mailbox          Mailbox?          @relation(fields: [mailboxId], references: [id])
-  owner            User              @relation("EngagementOwner", fields: [ownerId], references: [id])
-  assistantUser    User              @relation("EngagementAssistant", fields: [assistantUserId], references: [id])
-  assistantProfile AssistantProfile? @relation(fields: [assistantProfileId], references: [id])
+  organization     Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  mailbox          Mailbox?             @relation(fields: [mailboxId], references: [id])
+  owner            User                 @relation("EngagementOwner", fields: [ownerId], references: [id])
+  assistantUser    User                 @relation("EngagementAssistant", fields: [assistantUserId], references: [id])
+  assistantProfile AssistantProfile?    @relation(fields: [assistantProfileId], references: [id])
   timeEntries      AssistantTimeEntry[]
 
   @@index([organizationId])
@@ -549,35 +600,35 @@ enum CallInVoiceTier {
 }
 
 model AccessibilityPreference {
-  id              String  @id @default(cuid())
-  userId          String  @unique
-  textScale       Float   @default(1)
-  highContrast    Boolean @default(false)
-  reducedMotion   Boolean @default(false)
-  largeInterface  Boolean @default(false)
-  screenReaderOptimized Boolean @default(true)
-  preferVoiceOnboarding Boolean @default(true)
+  id                       String          @id @default(cuid())
+  userId                   String          @unique
+  textScale                Float           @default(1)
+  highContrast             Boolean         @default(false)
+  reducedMotion            Boolean         @default(false)
+  largeInterface           Boolean         @default(false)
+  screenReaderOptimized    Boolean         @default(true)
+  preferVoiceOnboarding    Boolean         @default(true)
   /// Phone call-in TTS: STANDARD (Cartesia, lower cost) or PREMIUM (ElevenLabs). Plan-gated.
-  callInVoiceTier CallInVoiceTier @default(STANDARD)
+  callInVoiceTier          CallInVoiceTier @default(STANDARD)
   /// One-time spoken tip about Standard vs Premium already delivered on a call.
-  callInVoiceTipSpoken Boolean @default(false)
+  callInVoiceTipSpoken     Boolean         @default(false)
   /// One-time tip when minutes ≥80% auto-prefers Standard to stretch the plan.
-  callInCostGuardTipSpoken Boolean @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  callInCostGuardTipSpoken Boolean         @default(false)
+  createdAt                DateTime        @default(now())
+  updatedAt                DateTime        @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model IndustryTemplate {
-  id          String   @id @default(cuid())
-  key         String   @unique
-  name        String
-  description String
+  id                  String   @id @default(cuid())
+  key                 String   @unique
+  name                String
+  description         String
   suggestedCategories Json
   suggestedRules      Json
-  disclaimer  String   @default("This product organizes and drafts correspondence; it does not replace licensed professional judgment.")
-  createdAt   DateTime @default(now())
+  disclaimer          String   @default("This product organizes and drafts correspondence; it does not replace licensed professional judgment.")
+  createdAt           DateTime @default(now())
 
   workspaces Workspace[]
 }
@@ -649,15 +700,15 @@ model ProtectedContact {
 }
 
 model RetentionPolicy {
-  id             String   @id @default(cuid())
-  organizationId String
-  workspaceId    String
-  mailboxId      String?
-  retainDays     Int
+  id               String   @id @default(cuid())
+  organizationId   String
+  workspaceId      String
+  mailboxId        String?
+  retainDays       Int
   neverDeleteKinds String[]
-  createdById    String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdById      String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
@@ -681,19 +732,19 @@ model FollowUpRule {
 }
 
 model VoiceProfile {
-  id             String   @id @default(cuid())
-  organizationId String
-  workspaceId    String
-  mailboxId      String   @unique
-  ownerId        String
-  greeting       String?
-  signature      String?
-  tone           String?
-  learningEnabled Boolean @default(false)
+  id               String    @id @default(cuid())
+  organizationId   String
+  workspaceId      String
+  mailboxId        String    @unique
+  ownerId          String
+  greeting         String?
+  signature        String?
+  tone             String?
+  learningEnabled  Boolean   @default(false)
   consentGrantedAt DateTime?
-  profileJson    Json?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  profileJson      Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   mailbox   Mailbox   @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
@@ -720,10 +771,10 @@ model Message {
   metadata       Json?
   createdAt      DateTime @default(now())
 
-  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  mailbox   Mailbox   @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
-  drafts    Draft[]
-  followUps FollowUp[]
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  mailbox              Mailbox              @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
+  drafts               Draft[]
+  followUps            FollowUp[]
   attachmentDeliveries AttachmentDelivery[]
 
   @@unique([mailboxId, gmailId])
@@ -734,24 +785,24 @@ model Message {
 /// Temporary, signed-in-only attachment download queued from phone or web Ask.
 /// Bytes expire after 48 hours and every lookup is tenant + requesting-user scoped.
 model AttachmentDelivery {
-  id                 String   @id @default(cuid())
-  organizationId     String
-  workspaceId        String
-  mailboxId          String
-  requestedById      String
-  messageId          String
-  gmailMessageId     String
-  gmailAttachmentId  String
-  filename           String
-  mimeType           String
-  byteSize           Int
-  fileBytes          Bytes
-  fromAddress        String
-  emailSubject       String
-  emailReceivedAt    DateTime
-  expiresAt          DateTime
-  downloadedAt       DateTime?
-  createdAt          DateTime @default(now())
+  id                String    @id @default(cuid())
+  organizationId    String
+  workspaceId       String
+  mailboxId         String
+  requestedById     String
+  messageId         String
+  gmailMessageId    String
+  gmailAttachmentId String
+  filename          String
+  mimeType          String
+  byteSize          Int
+  fileBytes         Bytes
+  fromAddress       String
+  emailSubject      String
+  emailReceivedAt   DateTime
+  expiresAt         DateTime
+  downloadedAt      DateTime?
+  createdAt         DateTime  @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -788,7 +839,7 @@ model Draft {
 }
 
 model FollowUp {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   workspaceId    String
   mailboxId      String
@@ -797,7 +848,7 @@ model FollowUp {
   note           String?
   completedAt    DateTime?
   createdById    String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   mailbox   Mailbox   @relation(fields: [mailboxId], references: [id], onDelete: Cascade)
@@ -856,17 +907,36 @@ enum CallSessionStatus {
 
 /// Verified phone numbers that may call in anytime and ask about the mailbox
 model CallInIdentity {
-  id             String   @id @default(cuid())
-  organizationId String
-  workspaceId    String
-  mailboxId      String?
-  userId         String
-  phoneE164      String
-  label          String?
-  verifiedAt     DateTime?
-  enabled        Boolean  @default(true)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  id                      String    @id @default(cuid())
+  organizationId          String
+  workspaceId             String
+  mailboxId               String?
+  userId                  String
+  phoneE164               String
+  label                   String?
+  verifiedAt              DateTime?
+  enabled                 Boolean   @default(true)
+  /// Next Primary index to read aloud, so "next" advances instead of re-reading.
+  readCursorIndex         Int       @default(0)
+  readCursorScope         String?
+  /// Provider call id the cursor belongs to; a new call always starts at 0.
+  readCursorCallId        String?
+  readCursorAt            DateTime?
+  /// Where the current message's body stopped, so "continue" resumes mid-email.
+  readBodyOffset          Int       @default(0)
+  /// Message key the body offset belongs to; any other message starts at 0.
+  readBodyKey             String?
+  /// Where the current attachment's text stopped, for long attachment reads.
+  readAttachmentOffset    Int       @default(0)
+  readAttachmentKey       String?
+  /// End time of the latest completed phone call; new Primary mail is counted after this.
+  lastSuccessfulCallAt    DateTime?
+  /// Explicit opt-in for outbound alerts when Gmail sync inserts new Primary mail.
+  callOnNewPrimary        Boolean   @default(false)
+  /// Reserved before VAPI call creation to batch bursts and prevent duplicate calls.
+  lastOutboundEmailCallAt DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   sessions CallSession[]
 
@@ -879,21 +949,21 @@ model CallInIdentity {
 /// All lookups are scoped by tenant IDs; shortCode is a public handoff identifier,
 /// never an authentication credential by itself.
 model ProvisioningRequest {
-  id                    String   @id @default(cuid())
+  id                    String    @id @default(cuid())
   organizationId        String
   workspaceId           String
   userId                String
-  callInIdentityId      String   @unique
+  callInIdentityId      String    @unique
   gmail                 String
   phoneE164             String
-  shortCode             String   @unique
-  needsGoogleTestUser   Boolean  @default(true)
-  googleTestUserEnabled Boolean  @default(false)
-  provisionedReady      Boolean  @default(false)
-  connectedTipSpoken    Boolean  @default(false)
+  shortCode             String    @unique
+  needsGoogleTestUser   Boolean   @default(true)
+  googleTestUserEnabled Boolean   @default(false)
+  provisionedReady      Boolean   @default(false)
+  connectedTipSpoken    Boolean   @default(false)
   connectedAt           DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@index([organizationId, workspaceId])
   @@index([userId, provisionedReady])
@@ -923,8 +993,8 @@ model CallSession {
   costSource       String?
   costBreakdown    Json?
 
-  identity    CallInIdentity? @relation(fields: [callInIdentityId], references: [id])
-  turns       CallTurn[]
+  identity CallInIdentity? @relation(fields: [callInIdentityId], references: [id])
+  turns    CallTurn[]
 
   @@index([organizationId, workspaceId, startedAt])
   @@index([organizationId, userId, startedAt])

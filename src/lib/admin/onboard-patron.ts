@@ -6,6 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { hashPassword } from "@/lib/auth";
 import { normalizePhoneE164 } from "@/lib/call-in/identity";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 import { product } from "@/lib/product";
 
 export type OnboardPatronInput = {
@@ -63,7 +64,7 @@ function slugify(input: string) {
 }
 
 export function googleAppPublished(): boolean {
-  return process.env.GOOGLE_OAUTH_PUBLISHED === "true";
+  return isGoogleOauthPublished();
 }
 
 function makeTempPassword(): string {

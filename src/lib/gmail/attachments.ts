@@ -40,6 +40,8 @@ export type CallInAttachmentSpeech = {
   readableText: string;
   /** Remaining text for “say more about this attachment” */
   remainingText: string;
+  /** Whole extracted text, so continuation can resume from any offset. */
+  fullText?: string;
   reason?: string;
 };
 
@@ -365,6 +367,7 @@ export async function enrichAttachmentsForSpeech(input: {
         remainingText: first.hasMore
           ? extracted.text.slice(first.nextOffset).trim()
           : "",
+        fullText: extracted.text,
       });
     } catch (err) {
       console.warn("[gmail] attachment enrich failed", err);

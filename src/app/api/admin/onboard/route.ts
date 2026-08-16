@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { onboardPatron } from "@/lib/admin/onboard-patron";
 import { getCurrentUser } from "@/lib/auth";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 import { isOperatorEmail } from "@/lib/operator";
 
 const schema = z.object({
@@ -143,7 +144,7 @@ export async function GET() {
   }
   return NextResponse.json({
     ok: true,
-    googlePublished: process.env.GOOGLE_OAUTH_PUBLISHED === "true",
+    googlePublished: isGoogleOauthPublished(),
     signInUrl: "https://inbox-chief-kappa.vercel.app/signin",
     callInNumber: process.env.NEXT_PUBLIC_VAPI_CALL_IN_NUMBER ?? "+14057169240",
     pendingProvisioning,

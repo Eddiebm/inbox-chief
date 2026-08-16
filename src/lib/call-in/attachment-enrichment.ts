@@ -116,6 +116,53 @@ export async function buildReadableEmailsWithAttachments(input: {
   });
 }
 
+/**
+ * Fetch attachment bytes for the single email about to be spoken.
+ *
+ * Snapshots are built without attachment bodies so a caller who never asks for
+ * email 7 never pays to download its files. Enrichment is cached on the email
+ * object for the lifetime of the snapshot.
+ */
+export async function enrichReadableEmailOnDemand(input: {
+  email: CallInReadableEmail;
+  organizationId: string;
+  workspaceId: string;
+  mailboxId: string;
+  userId: string;
+}): Promise<CallInReadableEmail> {
+  const { email } = input;
+  const pending = email.attachments ?? [];
+  if (pending.length === 0) return email;
+  if (!email.gmailMessageId) return email;
+  if (!input.mailboxId || input.mailboxId === "unknown_mb") return email;
+  // Already fetched (or definitively unreadable) — do not pay twice.
+  if (pending.some((a) => a.status !== "unsupported" || a.readableText)) {
+    return email;
+  }
+
+  const metaList: GmailAttachmentMeta[] = pending.map((a) => ({
+    filename: a.filename,
+    mimeType: a.mimeType,
+    size: a.size,
+    attachmentId: a.attachmentId ?? null,
+  }));
+
+  try {
+    const attachments = await enrichAttachmentsForSpeech({
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      mailboxId: input.mailboxId,
+      userId: input.userId,
+      gmailMessageId: email.gmailMessageId,
+      attachments: metaList,
+    });
+    email.attachments = attachments;
+  } catch (err) {
+    console.warn("[call-in] on-demand attachment enrich failed", err);
+  }
+  return email;
+}
+
 function metaListAsUnfetched(
   metaList: GmailAttachmentMeta[],
 ): CallInAttachmentSpeech[] {

@@ -83,20 +83,23 @@ export const CALL_IN_VOICE_TIERS: CallInVoiceTierInfo[] = [
 export const TTS_COST_SHARE_TIP_RATIO = 0.45;
 
 /**
- * Tighter speech budgets on Standard (TTS cost); Premium can be slightly richer.
+ * Per-turn speech budgets. These size ONE spoken turn — they are not content
+ * limits. Anything longer continues on the next turn ("say continue"), so no
+ * tier ever truncates an email body. Standard stays slightly tighter for TTS
+ * cost, but never tight enough to cut a message short.
  */
 export function speechBudgetsForTier(tier: CallInVoiceTierId): SpeechBudgets {
   if (tier === "premium") {
     return {
-      maxEmailTextChars: 400,
-      maxSpokenChars: 2000,
-      maxAttachmentTextChars: 850,
+      maxEmailTextChars: 1900,
+      maxSpokenChars: 2800,
+      maxAttachmentTextChars: 1500,
     };
   }
   return {
-    maxEmailTextChars: 260,
-    maxSpokenChars: 1400,
-    maxAttachmentTextChars: 480,
+    maxEmailTextChars: 1600,
+    maxSpokenChars: 2400,
+    maxAttachmentTextChars: 1200,
   };
 }
 

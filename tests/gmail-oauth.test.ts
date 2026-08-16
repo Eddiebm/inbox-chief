@@ -201,3 +201,14 @@ describe("extractGmailPlainText for call-in reading", () => {
     expect(text).toBe("Hello voice briefing");
   });
 });
+
+describe("gmail auth reconnect detection", () => {
+  it("flags invalid_grant as reconnect", async () => {
+    const { isGmailAuthFailure, GMAIL_NEEDS_RECONNECT_SPOKEN } = await import(
+      "@/lib/gmail/auth-errors"
+    );
+    expect(isGmailAuthFailure(new Error("invalid_grant"))).toBe(true);
+    expect(isGmailAuthFailure(new Error("network timeout"))).toBe(false);
+    expect(GMAIL_NEEDS_RECONNECT_SPOKEN).toMatch(/reconnect/i);
+  });
+});

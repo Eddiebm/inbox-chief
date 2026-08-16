@@ -65,6 +65,14 @@ export function speakableAttachmentType(
   ) {
     return "Word document";
   }
+  if (
+    mime.includes("presentationml") ||
+    mime === "application/vnd.ms-powerpoint" ||
+    name.endsWith(".pptx") ||
+    name.endsWith(".ppt")
+  ) {
+    return "PowerPoint";
+  }
   if (mime === "text/plain" || name.endsWith(".txt")) return "text file";
   if (mime === "text/html" || name.endsWith(".html") || name.endsWith(".htm")) {
     return "HTML file";
@@ -95,6 +103,8 @@ export function isSupportedTextAttachment(
     name.endsWith(".pdf") ||
     mime.includes("wordprocessingml") ||
     name.endsWith(".docx") ||
+    mime.includes("presentationml") ||
+    name.endsWith(".pptx") ||
     mime === "text/plain" ||
     mime === "text/html" ||
     mime === "text/csv" ||
@@ -107,9 +117,16 @@ export function isSupportedTextAttachment(
   ) {
     return true;
   }
-  // Legacy .doc is not reliably extractable without heavy libs
+  // Legacy .doc / .ppt are not reliably extractable without heavy libs
   if (mime === "application/msword" || name.endsWith(".doc")) return false;
+  if (mime === "application/vnd.ms-powerpoint" || isLegacyPptFilename(name)) {
+    return false;
+  }
   return false;
+}
+
+function isLegacyPptFilename(name: string): boolean {
+  return name.endsWith(".ppt") && !name.endsWith(".pptx");
 }
 
 /** Slice text for first TTS pass; remaining used for “say more”. */
@@ -178,6 +195,20 @@ export async function extractAttachmentText(input: {
     };
   }
 
+  const lowerName = (filename ?? "").toLowerCase();
+  if (
+    mime === "application/vnd.ms-powerpoint" ||
+    isLegacyPptFilename(lowerName)
+  ) {
+    return {
+      status: "unsupported",
+      text: "",
+      speakableType,
+      reason:
+        "I can only read modern PowerPoint files ending in .pptx, not older .ppt files. I can note the filename.",
+    };
+  }
+
   if (!isSupportedTextAttachment(mime, filename)) {
     return {
       status: "unsupported",
@@ -190,7 +221,7 @@ export async function extractAttachmentText(input: {
   try {
     if (
       mime === "application/pdf" ||
-      (filename ?? "").toLowerCase().endsWith(".pdf")
+      lowerName.endsWith(".pdf")
     ) {
       const text = extractPdfPlainText(input.bytes);
       if (text) {
@@ -220,7 +251,7 @@ export async function extractAttachmentText(input: {
 
     if (
       mime.includes("wordprocessingml") ||
-      (filename ?? "").toLowerCase().endsWith(".docx")
+      lowerName.endsWith(".docx")
     ) {
       const text = await extractDocxPlainText(input.bytes);
       if (!text) {
@@ -235,7 +266,24 @@ export async function extractAttachmentText(input: {
       return { status: "ok", text, speakableType };
     }
 
-    if (mime === "text/html" || (filename ?? "").toLowerCase().endsWith(".html")) {
+    if (
+      mime.includes("presentationml") ||
+      lowerName.endsWith(".pptx")
+    ) {
+      const text = await extractPptxPlainText(input.bytes);
+      if (!text) {
+        return {
+          status: "empty",
+          text: "",
+          speakableType,
+          reason:
+            "This PowerPoint had no readable text. I can note the filename.",
+        };
+      }
+      return { status: "ok", text, speakableType };
+    }
+
+    if (mime === "text/html" || lowerName.endsWith(".html") || lowerName.endsWith(".htm")) {
       const text = stripHtmlToText(input.bytes.toString("utf8"));
       if (!text) {
         return {
@@ -351,4 +399,61 @@ async function extractDocxPlainText(bytes: Buffer): Promise<string> {
   const mammoth = await import("mammoth");
   const result = await mammoth.extractRawText({ buffer: bytes });
   return normalizeWhitespace(result.value ?? "");
+}
+
+/**
+ * PPTX is OOXML (zip). Read `ppt/slides/slideN.xml` in numeric order and
+ * collect DrawingML text runs (`<a:t>`), labeling each slide for speech.
+ */
+async function extractPptxPlainText(bytes: Buffer): Promise<string> {
+  const JSZip = (await import("jszip")).default;
+  const zip = await JSZip.loadAsync(bytes);
+  const slidePaths = Object.keys(zip.files)
+    .filter((path) => /^ppt\/slides\/slide\d+\.xml$/i.test(path))
+    .sort((a, b) => slideNumberFromPath(a) - slideNumberFromPath(b));
+
+  const parts: string[] = [];
+  for (const path of slidePaths) {
+    const file = zip.file(path);
+    if (!file) continue;
+    const xml = await file.async("string");
+    const slideText = extractDrawingMlText(xml);
+    if (!slideText) continue;
+    const n = slideNumberFromPath(path);
+    parts.push(`Slide ${n}. ${slideText}`);
+  }
+  return normalizeWhitespace(parts.join(" "));
+}
+
+function slideNumberFromPath(path: string): number {
+  const match = /slide(\d+)\.xml$/i.exec(path);
+  return match ? Number(match[1]) : 0;
+}
+
+/** Pull plain text from OOXML DrawingML `<a:t>` runs; decode common entities. */
+function extractDrawingMlText(xml: string): string {
+  const runs: string[] = [];
+  const re = /<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(xml)) !== null) {
+    const decoded = decodeXmlEntities(match[1] ?? "");
+    if (decoded.trim()) runs.push(decoded);
+  }
+  return normalizeWhitespace(runs.join(" "));
+}
+
+function decodeXmlEntities(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) =>
+      String.fromCharCode(Number(n)),
+    )
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h: string) =>
+      String.fromCharCode(parseInt(h, 16)),
+    )
+    .replace(/&amp;/g, "&");
 }

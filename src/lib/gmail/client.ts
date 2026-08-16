@@ -10,8 +10,16 @@
 
 import { google } from "googleapis";
 import { encryptSecret } from "@/lib/crypto/token-encryption";
+import {
+  triggerOutboundEmailAlert,
+  type NewMailForOutboundAlert,
+} from "@/lib/call-in/outbound-email-alert";
 import { categoryNameFromGmailLabels } from "@/lib/call-in/primary-inbox";
 import { extractGmailAttachmentMeta } from "@/lib/gmail/attachments";
+import {
+  isGmailAuthFailure,
+  markMailboxNeedsReconnect,
+} from "@/lib/gmail/auth-errors";
 import { getGmailOAuthConfig } from "@/lib/gmail/config";
 import {
   assertSyncOperationsSafe,
@@ -21,6 +29,7 @@ import {
 } from "@/lib/gmail/scopes";
 import { getDecryptedMailboxTokensForTenant } from "@/lib/gmail/tokens";
 import { writeAuditLog } from "@/lib/audit";
+import { parseMailboxAddress } from "@/lib/contacts";
 
 export type MailboxConnectInput = {
   organizationId: string;
@@ -36,8 +45,13 @@ export type MailboxSyncInput = {
   workspaceId: string;
   mailboxId: string;
   userId: string;
-  /** Max messages to fetch on a light sync */
+  /**
+   * How deep to keep the mailbox synced (Primary pass + inbox pass).
+   * Defaults to GMAIL_SYNC_DEFAULT_DEPTH; already-stored messages are skipped.
+   */
   maxResults?: number;
+  /** Call-in/web reads may refresh mail without initiating a second phone call. */
+  suppressOutboundAlert?: boolean;
 };
 
 export type GmailConnectResult = {
@@ -54,8 +68,49 @@ export type GmailSyncResult = {
   ok: boolean;
   stub?: boolean;
   fetched: number;
+  /** Messages already stored and skipped (no Gmail body re-download) */
+  skippedExisting?: number;
+  outboundEmailAlert?: {
+    called: boolean;
+    newPrimaryCount: number;
+    reason?: string;
+  };
   reason?: string;
 };
+
+/** Default number of recent messages to keep synced per mailbox. */
+export const GMAIL_SYNC_DEFAULT_DEPTH = 60;
+export const GMAIL_SYNC_MAX_DEPTH = 200;
+/** Gmail list page size (API max is 500; keep pages small for latency). */
+const GMAIL_LIST_PAGE_SIZE = 50;
+/** Parallel `messages.get` calls per batch. */
+const GMAIL_FETCH_CONCURRENCY = 5;
+
+/**
+ * Gmail search that isolates the Primary tab. Negating the other category
+ * labels also works for mailboxes that never enabled tabs, where
+ * `category:primary` returns nothing.
+ */
+export const GMAIL_PRIMARY_QUERY =
+  "in:inbox -category:promotions -category:social -category:updates -category:forums";
+/** Whole inbox (still excludes sent, drafts, archived, spam and trash). */
+export const GMAIL_INBOX_QUERY = "in:inbox";
+
+export type GmailSyncPass = { q: string; target: number };
+
+/**
+ * Primary first, then the rest of the inbox.
+ *
+ * A newsletter-heavy mailbox can push every Primary message out of a plain
+ * "newest N" window, which is why Primary gets its own guaranteed pass.
+ */
+export function buildGmailSyncPasses(depth: number): GmailSyncPass[] {
+  const total = Math.min(Math.max(Math.floor(depth) || 0, 1), GMAIL_SYNC_MAX_DEPTH);
+  return [
+    { q: GMAIL_PRIMARY_QUERY, target: total },
+    { q: GMAIL_INBOX_QUERY, target: total },
+  ];
+}
 
 export { GMAIL_OAUTH_SCOPES as REQUIRED_SCOPES };
 
@@ -100,7 +155,11 @@ function parseAddressList(raw: string): string[] {
     .filter(Boolean);
 }
 
-const MAX_SYNCED_BODY_CHARS = 4000;
+/**
+ * Bodies are read aloud in full across several spoken turns, so this only
+ * guards pathological messages (huge auto-generated dumps), not normal mail.
+ */
+export const MAX_SYNCED_BODY_CHARS = 40_000;
 
 type GmailPayloadPart = {
   mimeType?: string | null;
@@ -174,6 +233,48 @@ export function extractGmailPlainText(
   return html.length > MAX_SYNCED_BODY_CHARS
     ? `${html.slice(0, MAX_SYNCED_BODY_CHARS)}…`
     : html;
+}
+
+/**
+ * Fetch one message's plain-text body straight from Gmail (readonly).
+ *
+ * Used when a call-in read needs the whole body and the synced row only has a
+ * snippet or a truncated body. Returns null when Gmail or tokens are missing.
+ */
+export async function fetchGmailMessageBodyText(input: {
+  organizationId: string;
+  workspaceId: string;
+  mailboxId: string;
+  userId: string;
+  gmailMessageId: string;
+}): Promise<string | null> {
+  assertSyncOperationsSafe(GMAIL_SYNC_ALLOWED_OPERATIONS);
+
+  const config = getGmailOAuthConfig();
+  if (!config.ok) return null;
+
+  const decrypted = await getDecryptedMailboxTokensForTenant({
+    organizationId: input.organizationId,
+    workspaceId: input.workspaceId,
+    mailboxId: input.mailboxId,
+    userId: input.userId,
+  });
+  if (!decrypted?.refreshToken && !decrypted?.accessToken) return null;
+
+  const client = oauth2Client();
+  client.setCredentials({
+    access_token: decrypted.accessToken,
+    refresh_token: decrypted.refreshToken,
+    expiry_date: decrypted.expiresAt?.getTime(),
+  });
+
+  const gmail = google.gmail({ version: "v1", auth: client });
+  const full = await gmail.users.messages.get({
+    userId: "me",
+    id: input.gmailMessageId,
+    format: "full",
+  });
+  return extractGmailPlainText(full.data.payload as GmailPayloadPart | undefined);
 }
 
 /**
@@ -424,126 +525,264 @@ export async function syncMailbox(
     }
   });
 
-  const gmail = google.gmail({ version: "v1", auth: client });
-  const maxResults = Math.min(Math.max(input.maxResults ?? 25, 1), 50);
+  try {
+    const gmail = google.gmail({ version: "v1", auth: client });
+    const depth = Math.min(
+      Math.max(input.maxResults ?? GMAIL_SYNC_DEFAULT_DEPTH, 1),
+      GMAIL_SYNC_MAX_DEPTH,
+    );
 
-  const listed = await gmail.users.messages.list({
-    userId: "me",
-    maxResults,
-  });
+    const { getNodePrisma } = await import("@/lib/db-node");
+    const prisma = getNodePrisma();
 
-  const messageRefs = listed.data.messages ?? [];
-  let fetched = 0;
+    // Primary tab first, then the rest of the inbox, both paginated.
+    const messageIds: string[] = [];
+    const seen = new Set<string>();
+    for (const pass of buildGmailSyncPasses(depth)) {
+      let pageToken: string | undefined;
+      let collected = 0;
+      do {
+        const listed = await gmail.users.messages.list({
+          userId: "me",
+          q: pass.q,
+          maxResults: Math.min(GMAIL_LIST_PAGE_SIZE, pass.target - collected),
+          ...(pageToken ? { pageToken } : {}),
+        });
+        for (const ref of listed.data.messages ?? []) {
+          if (!ref.id || seen.has(ref.id)) continue;
+          seen.add(ref.id);
+          messageIds.push(ref.id);
+        }
+        collected += (listed.data.messages ?? []).length;
+        pageToken = listed.data.nextPageToken ?? undefined;
+      } while (pageToken && collected < pass.target);
+    }
 
-  const { getNodePrisma } = await import("@/lib/db-node");
-  const prisma = getNodePrisma();
-
-  for (const ref of messageRefs) {
-    if (!ref.id) continue;
-
-    // Full message for readable body/snippet on call-in — never send.
-    const full = await gmail.users.messages.get({
-      userId: "me",
-      id: ref.id,
-      format: "full",
-    });
-
-    const headers = full.data.payload?.headers ?? [];
-    const fromAddress = headerValue(headers, "From") || "unknown";
-    const toAddresses = parseAddressList(headerValue(headers, "To"));
-    const subject = headerValue(headers, "Subject") || "(no subject)";
-    const receivedAt = full.data.internalDate
-      ? new Date(Number(full.data.internalDate))
-      : new Date();
-    const payload = full.data.payload as GmailPayloadPart | undefined;
-    const bodyText = extractGmailPlainText(payload);
-    // Metadata only during sync — bytes fetched on demand when reading aloud
-    const attachments = extractGmailAttachmentMeta(payload);
-    const labelIds = full.data.labelIds ?? [];
-    const isRead = !labelIds.includes("UNREAD");
-    // Unread → needs attention for call-in / inbox triage defaults
-    const needsAttention = !isRead;
-    // Gmail tabs: PRIMARY / PROMOTIONS / SOCIAL / UPDATES / FORUMS / SPAM
-    const categoryName = categoryNameFromGmailLabels(labelIds);
-
-    const messageMetadata = {
-      labelIds,
-      historyId: full.data.historyId ?? null,
-      attachments,
-      categoryName,
-    };
-
-    await prisma.message.upsert({
+    // Track truly new rows separately from rows whose body was previously absent.
+    const knownMessages = await prisma.message.findMany({
       where: {
-        mailboxId_gmailId: {
-          mailboxId: input.mailboxId,
-          gmailId: ref.id,
-        },
-      },
-      create: {
         organizationId: input.organizationId,
         workspaceId: input.workspaceId,
         mailboxId: input.mailboxId,
-        gmailId: ref.id,
-        threadId: full.data.threadId ?? ref.threadId ?? null,
-        fromAddress,
-        toAddresses,
-        subject,
-        snippet: full.data.snippet ?? null,
-        bodyText,
-        receivedAt,
-        categoryName,
-        isRead,
-        needsAttention,
-        metadata: messageMetadata,
+        gmailId: { in: messageIds },
       },
-      update: {
+      select: { gmailId: true },
+    });
+    const knownIds = new Set(knownMessages.map((row) => row.gmailId));
+
+    // Bodies never change, so only download messages we have not stored yet.
+    const alreadyStored = await prisma.message.findMany({
+      where: {
         organizationId: input.organizationId,
         workspaceId: input.workspaceId,
-        threadId: full.data.threadId ?? ref.threadId ?? null,
-        fromAddress,
-        toAddresses,
-        subject,
-        snippet: full.data.snippet ?? null,
-        ...(bodyText ? { bodyText } : {}),
-        receivedAt,
-        categoryName,
-        isRead,
-        needsAttention,
-        metadata: messageMetadata,
+        mailboxId: input.mailboxId,
+        gmailId: { in: messageIds },
+        bodyText: { not: null },
+      },
+      select: { gmailId: true },
+    });
+    const storedIds = new Set(alreadyStored.map((row) => row.gmailId));
+    const toFetch = messageIds.filter((id) => !storedIds.has(id));
+
+    let fetched = 0;
+    const newMessages: NewMailForOutboundAlert[] = [];
+
+    for (let i = 0; i < toFetch.length; i += GMAIL_FETCH_CONCURRENCY) {
+      const batch = toFetch.slice(i, i + GMAIL_FETCH_CONCURRENCY);
+      const rows = await Promise.all(
+        batch.map(async (id) => {
+          // Full message for readable body/snippet on call-in — never send.
+          const full = await gmail.users.messages.get({
+            userId: "me",
+            id,
+            format: "full",
+          });
+          return { id, full };
+        }),
+      );
+
+      for (const { id, full } of rows) {
+        const headers = full.data.payload?.headers ?? [];
+        const fromAddress = headerValue(headers, "From") || "unknown";
+        const toAddresses = parseAddressList(headerValue(headers, "To"));
+        const subject = headerValue(headers, "Subject") || "(no subject)";
+        const receivedAt = full.data.internalDate
+          ? new Date(Number(full.data.internalDate))
+          : new Date();
+        const payload = full.data.payload as GmailPayloadPart | undefined;
+        const bodyText = extractGmailPlainText(payload);
+        // Metadata only during sync — bytes fetched on demand when reading aloud
+        const attachments = extractGmailAttachmentMeta(payload);
+        const labelIds = full.data.labelIds ?? [];
+        const isRead = !labelIds.includes("UNREAD");
+        // Unread → needs attention for inbox triage; reads walk all of Primary.
+        const needsAttention = !isRead;
+        // Gmail tabs: PRIMARY / PROMOTIONS / SOCIAL / UPDATES / FORUMS / SPAM
+        const categoryName = categoryNameFromGmailLabels(labelIds);
+
+        const messageMetadata = {
+          labelIds,
+          historyId: full.data.historyId ?? null,
+          attachments,
+          categoryName,
+        };
+        if (!knownIds.has(id)) {
+          newMessages.push({
+            fromAddress,
+            subject,
+            snippet: full.data.snippet ?? null,
+            bodyText,
+            categoryName,
+            metadata: messageMetadata,
+            receivedAt,
+          });
+        }
+
+        await prisma.message.upsert({
+          where: {
+            mailboxId_gmailId: {
+              mailboxId: input.mailboxId,
+              gmailId: id,
+            },
+          },
+          create: {
+            organizationId: input.organizationId,
+            workspaceId: input.workspaceId,
+            mailboxId: input.mailboxId,
+            gmailId: id,
+            threadId: full.data.threadId ?? null,
+            fromAddress,
+            toAddresses,
+            subject,
+            snippet: full.data.snippet ?? null,
+            bodyText,
+            receivedAt,
+            categoryName,
+            isRead,
+            needsAttention,
+            metadata: messageMetadata,
+          },
+          update: {
+            organizationId: input.organizationId,
+            workspaceId: input.workspaceId,
+            threadId: full.data.threadId ?? null,
+            fromAddress,
+            toAddresses,
+            subject,
+            snippet: full.data.snippet ?? null,
+            ...(bodyText ? { bodyText } : {}),
+            receivedAt,
+            categoryName,
+            isRead,
+            needsAttention,
+            metadata: messageMetadata,
+          },
+        });
+        const contact = parseMailboxAddress(fromAddress);
+        if (contact) {
+          await prisma.contact.upsert({
+            where: {
+              mailboxId_email: {
+                mailboxId: input.mailboxId,
+                email: contact.email,
+              },
+            },
+            create: {
+              organizationId: input.organizationId,
+              workspaceId: input.workspaceId,
+              mailboxId: input.mailboxId,
+              email: contact.email,
+              displayName: contact.displayName,
+              lastSeenAt: receivedAt,
+            },
+            update: {
+              organizationId: input.organizationId,
+              workspaceId: input.workspaceId,
+              ...(contact.displayName ? { displayName: contact.displayName } : {}),
+              messageCount: { increment: 1 },
+              lastSeenAt: receivedAt,
+            },
+          });
+        }
+        fetched += 1;
+      }
+    }
+
+    const profile = await gmail.users.getProfile({ userId: "me" });
+
+    await prisma.mailbox.updateMany({
+      where: {
+        id: input.mailboxId,
+        organizationId: input.organizationId,
+        workspaceId: input.workspaceId,
+      },
+      data: {
+        lastSyncedAt: new Date(),
+        connectionStatus: "connected",
+        ...(profile.data.historyId
+          ? { gmailHistoryId: String(profile.data.historyId) }
+          : {}),
       },
     });
-    fetched += 1;
-  }
 
-  const profile = await gmail.users.getProfile({ userId: "me" });
+    let outboundEmailAlert: GmailSyncResult["outboundEmailAlert"];
+    if (!input.suppressOutboundAlert) {
+      try {
+        const alert = await triggerOutboundEmailAlert({
+          prisma,
+          organizationId: input.organizationId,
+          workspaceId: input.workspaceId,
+          mailboxId: input.mailboxId,
+          userId: input.userId,
+          mailboxConnected: true,
+          newMessages,
+        });
+        outboundEmailAlert = {
+          called: alert.called,
+          newPrimaryCount: alert.newPrimaryCount,
+          ...(!alert.called ? { reason: alert.reason } : {}),
+        };
+      } catch (alertError) {
+        console.error("[gmail-sync] outbound email alert failed", alertError);
+      }
+    }
 
-  await prisma.mailbox.updateMany({
-    where: {
-      id: input.mailboxId,
+    await writeAuditLog({
       organizationId: input.organizationId,
       workspaceId: input.workspaceId,
-    },
-    data: {
-      lastSyncedAt: new Date(),
-      connectionStatus: "connected",
-      ...(profile.data.historyId
-        ? { gmailHistoryId: String(profile.data.historyId) }
-        : {}),
-    },
-  });
+      mailboxId: input.mailboxId,
+      actorId: input.userId,
+      action: "SYSTEM",
+      summary: `Synced ${fetched} new Gmail message(s) of ${messageIds.length} recent Primary/inbox message(s) (headers + body + attachment metadata for voice; never auto-send)`,
+      resourceType: "mailbox",
+      resourceId: input.mailboxId,
+      metadata: {
+        fetched,
+        listed: messageIds.length,
+        skippedExisting: storedIds.size,
+        operations: [...GMAIL_SYNC_ALLOWED_OPERATIONS],
+      },
+    });
 
-  await writeAuditLog({
-    organizationId: input.organizationId,
-    workspaceId: input.workspaceId,
-    mailboxId: input.mailboxId,
-    actorId: input.userId,
-    action: "SYSTEM",
-    summary: `Synced ${fetched} Gmail message(s) (headers + body + attachment metadata for voice; never auto-send)`,
-    resourceType: "mailbox",
-    resourceId: input.mailboxId,
-    metadata: { fetched, operations: [...GMAIL_SYNC_ALLOWED_OPERATIONS] },
-  });
-
-  return { ok: true, fetched };
+    return {
+      ok: true,
+      fetched,
+      skippedExisting: storedIds.size,
+      ...(outboundEmailAlert ? { outboundEmailAlert } : {}),
+    };
+  } catch (error) {
+    if (isGmailAuthFailure(error)) {
+      await markMailboxNeedsReconnect({
+        organizationId: input.organizationId,
+        workspaceId: input.workspaceId,
+        mailboxId: input.mailboxId,
+      });
+      return {
+        ok: false,
+        fetched: 0,
+        reason: "needs_reconnect",
+      };
+    }
+    throw error;
+  }
 }

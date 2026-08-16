@@ -10,6 +10,10 @@ type ChecklistItem = {
   copyValue?: string;
 };
 
+/** Deep link to the prod project's test-user list — see docs/GOOGLE_OAUTH_PUBLISH.md. */
+const GOOGLE_TEST_USERS_URL =
+  "https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372";
+
 type PendingProvisioning = {
   id: string;
   gmail: string;
@@ -72,8 +76,8 @@ export function AdminOnboardForm() {
         if (onboard.signInUrl) setSignInUrl(onboard.signInUrl);
         setStatus(
           onboard.googlePublished
-            ? "OAuth Published — create patrons and share sign-in. No test-user step."
-            : "OAuth not Published — add each Gmail as a test user, then confirm below.",
+            ? "Google verification is live — create patrons and share sign-in. No test-user step."
+            : "Google verification is still pending — add each Gmail as a test user, then confirm below.",
         );
       } catch {
         if (!cancelled) setAllowed(false);
@@ -201,13 +205,39 @@ export function AdminOnboardForm() {
         >
           <h2 id="voice-provisioning-heading">Pending voice signups</h2>
           <p>
-            Add each Gmail under Google Cloud → Audience → Test users, then mark
-            it enabled. Patrons can complete Google consent from their saved link.
+            These patrons already finished the phone signup. Paste their Gmail
+            addresses into{" "}
+            <a
+              href={GOOGLE_TEST_USERS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Google Audience → Test users
+            </a>
+            , then mark each one enabled. Their saved link then opens Google
+            consent — you never have to message them again.
           </p>
           {pendingProvisioning.length === 0 ? (
             <p role="status">No pending voice signups.</p>
           ) : (
-            <ul>
+            <>
+              {pendingProvisioning.length > 1 ? (
+                <p>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() =>
+                      void copyText(
+                        pendingProvisioning.map((item) => item.gmail).join(", "),
+                        `all ${pendingProvisioning.length} pending Gmail addresses`,
+                      )
+                    }
+                  >
+                    Copy all {pendingProvisioning.length} pending Gmail addresses
+                  </button>
+                </p>
+              ) : null}
+              <ul>
               {pendingProvisioning.map((item) => (
                 <li key={item.id}>
                   <p>
@@ -235,7 +265,8 @@ export function AdminOnboardForm() {
                   </label>
                 </li>
               ))}
-            </ul>
+              </ul>
+            </>
           )}
         </section>
       ) : null}
@@ -317,8 +348,15 @@ export function AdminOnboardForm() {
               Gmail enabled for this patron (added as Google OAuth test user)
             </label>
             <p>
-              Until OAuth is Published, you must add their Gmail under Google
-              Cloud → Audience → Test users before invite is ready.
+              Until Google finishes verification, add their Gmail under{" "}
+              <a
+                href={GOOGLE_TEST_USERS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Audience → Test users
+              </a>{" "}
+              before the invite is ready.
             </p>
           </div>
         ) : (

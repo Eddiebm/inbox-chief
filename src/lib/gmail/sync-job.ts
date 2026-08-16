@@ -1,4 +1,5 @@
 import { tenantWhere, type TenantScope } from "@/lib/tenant";
+import { getNodePrisma } from "@/lib/db-node";
 import { syncMailbox } from "@/lib/gmail/client";
 import { assertSyncOperationsSafe, GMAIL_SYNC_ALLOWED_OPERATIONS } from "@/lib/gmail/scopes";
 
@@ -36,7 +37,6 @@ export async function runGmailSyncJob(params: GmailSyncJobParams) {
 
   const where = tenantWhere(scope);
 
-  const { getNodePrisma } = await import("@/lib/db-node");
   const prisma = getNodePrisma();
   const mailbox = await prisma.mailbox.findFirst({ where });
   if (!mailbox) {

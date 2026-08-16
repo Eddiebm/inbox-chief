@@ -1,0 +1,316 @@
+# Google OAuth restricted-scope verification — do-this-now checklist (Eddie only)
+
+Everything in this file requires a human in the Google Cloud Console and cannot be
+done from code. When it is finished, flipping **one** environment variable
+(`GOOGLE_OAUTH_PUBLISHED=true`) removes every "unverified app" instruction from
+the patron-facing app automatically. See [Step 9](#step-9--flip-the-flag).
+
+**Project facts you will need to paste:**
+
+| Field | Value |
+| --- | --- |
+| Google account that owns prod OAuth | `eddie@bannermanmenson.com` |
+| Cloud project ID | `gen-lang-client-0169179372` |
+| Prod OAuth client ID | `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls.apps.googleusercontent.com` |
+| Support / contact email | `eddie@bannermanmenson.com` |
+| Restricted scope | `https://www.googleapis.com/auth/gmail.readonly` |
+| Sensitive scope | `https://www.googleapis.com/auth/gmail.send` |
+| Sensitive scope (optional feature) | `https://www.googleapis.com/auth/calendar.readonly` |
+
+---
+
+## Step 0 — Buy a custom domain first (hard blocker)
+
+**You cannot get verified on `inbox-chief-kappa.vercel.app`.** Google requires
+you to prove ownership of every authorized domain in Google Search Console, and
+it asks for the "top private domain". `vercel.app` is on the public suffix list,
+so it is not a domain you can own or verify, and Google explicitly tells apps on
+a shared provider domain to move to their own domain.
+
+Do this before anything else:
+
+1. Buy a domain you control (e.g. `inboxchief.com`). Vercel → Domains, or any registrar.
+2. Add it to the Vercel project `inbox-chief` and let the TLS certificate issue.
+3. Set these Vercel environment variables (Production **and** Preview) to the new host:
+   - `NEXT_PUBLIC_APP_URL=https://inboxchief.com`
+   - `CALL_IN_PUBLIC_BASE_URL=https://inboxchief.com`
+   - `GOOGLE_REDIRECT_URI=https://inboxchief.com/api/gmail/callback`
+4. In the Google client config, add the new redirect URI (see Step 3).
+5. Re-run `npm run vapi:setup-call-in` so the phone assistant speaks the new URL.
+
+Everything below assumes `inboxchief.com`. Substitute your real domain.
+
+---
+
+## Step 1 — Verify domain ownership in Search Console
+
+1. Open https://search.google.com/search-console — sign in as `eddie@bannermanmenson.com`
+   (must be the same account that is Owner/Editor on the Cloud project).
+2. **Add property** → choose **Domain** → enter `inboxchief.com`.
+3. Copy the TXT record Google shows, add it in your registrar's DNS, then click **Verify**.
+4. Wait until the property shows as verified. Verification failures here are the
+   single most common cause of a rejected OAuth submission.
+
+---
+
+## Step 2 — Configure the consent screen (Branding)
+
+Open https://console.cloud.google.com/auth/branding?project=gen-lang-client-0169179372
+
+Enter exactly:
+
+| Field | Paste this |
+| --- | --- |
+| App name | `Inbox Chief` |
+| User support email | `eddie@bannermanmenson.com` |
+| App logo | Square PNG, 120×120 or larger, no transparency, matches the site branding |
+| Application home page | `https://inboxchief.com` |
+| Application privacy policy link | `https://inboxchief.com/privacy` |
+| Application terms of service link | `https://inboxchief.com/terms` |
+| Authorized domain | `inboxchief.com` |
+| Developer contact email | `eddie@bannermanmenson.com` |
+
+Notes:
+
+- Add the **authorized domain before** the homepage/privacy/terms URLs, or the console rejects them.
+- The consent screen language toggle (bottom-left) must be **English**.
+- Audience must be **External**, publishing status **In production**.
+- Changing the app name, logo, or any of these URLs later forces a fresh brand review.
+
+---
+
+## Step 3 — Confirm the OAuth client redirect URIs
+
+Open https://console.cloud.google.com/auth/clients?project=gen-lang-client-0169179372
+→ open the client `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls...`
+
+Authorized redirect URIs must contain (keep the Vercel one until the domain cutover is done):
+
+```
+https://inboxchief.com/api/gmail/callback
+https://inbox-chief-kappa.vercel.app/api/gmail/callback
+```
+
+Authorized JavaScript origins:
+
+```
+https://inboxchief.com
+```
+
+---
+
+## Step 4 — Declare exactly these scopes
+
+Open https://console.cloud.google.com/auth/scopes?project=gen-lang-client-0169179372
+
+Add only:
+
+```
+https://www.googleapis.com/auth/gmail.readonly
+https://www.googleapis.com/auth/gmail.send
+https://www.googleapis.com/auth/calendar.readonly
+```
+
+Do not add `https://mail.google.com/`, `gmail.modify`, or any drive/contacts
+scope. Requesting anything broader than the above will get the submission
+bounced for violating minimum-scope policy.
+
+---
+
+## Step 5 — Scope justification (copy-paste)
+
+Paste each block into the matching justification box in the Verification Center.
+
+### `gmail.readonly` (restricted)
+
+```
+Inbox Chief is an accessibility-first email assistant for blind and low-vision
+users. Patrons cannot read a screen, so they call a phone number and the
+assistant reads their email aloud over the phone.
+
+gmail.readonly is required to fetch the content the user asks to hear. When a
+patron says "read my emails", we call users.messages.list and users.messages.get
+to retrieve the sender, subject, received time, and the full message body, then
+read that text aloud via text-to-speech. If the message has an attachment, we
+call users.messages.attachments.get only when the patron explicitly asks for that
+specific attachment, so we can convert it to speech.
+
+A narrower scope does not work for this product. gmail.metadata returns only
+headers and labels, which cannot be read aloud as the content of the email, and
+that content is the entire function of the product. We request read-only access
+rather than gmail.modify because we never alter, label, or delete the user's
+mail.
+
+Data handling: message content is used solely to answer the signed-in patron's
+own spoken request. We store message metadata and body text only to serve the
+patron's own account, encrypted at rest, scoped per tenant. We do not use Gmail
+data for advertising, we do not sell it, and we do not use it to train
+generalized AI models. Patrons can disconnect the mailbox or delete their
+account at any time from Settings, which revokes our token and removes their
+data.
+```
+
+### `gmail.send` (sensitive)
+
+```
+gmail.send is used only to deliver a reply that the patron has already approved.
+
+The flow is deliberately two-stage and never automatic. The assistant drafts a
+reply, reads the full draft back to the patron over the phone, and the patron
+must give an explicit spoken confirmation in a separate second step before the
+message is delivered. Nothing is sent without that human approval; the product
+enforces this in code and rejects any tool call that would send mail without a
+confirmed approval.
+
+We request gmail.send rather than a broader scope because we only ever need to
+deliver a new outbound message. We do not need to read, modify, label, or delete
+mail with this scope.
+```
+
+### `calendar.readonly` (sensitive, optional feature)
+
+```
+Calendar is an optional feature the patron connects separately. When a patron
+asks "what's on my calendar today", we call events.list and read the event
+start time, title, and location aloud. We request read-only access because the
+assistant never creates, edits, or deletes events.
+```
+
+---
+
+## Step 6 — Limited Use disclosure (already live)
+
+Google will check that your privacy policy contains the Limited Use language.
+This is **already implemented** and deployed at `/privacy` under the heading
+**"Limited Use disclosure"** (source: `src/app/privacy/page.tsx`). It states that
+Inbox Chief's use and transfer of Google API data adheres to the Google API
+Services User Data Policy including the Limited Use requirements, that data is
+not used for advertising or sold, and that humans do not read the data except
+with consent, for security, or when aggregated/anonymized.
+
+Action needed: nothing, except confirm the page loads on the new custom domain
+at `https://inboxchief.com/privacy` before submitting.
+
+---
+
+## Step 7 — Demo video
+
+Requirements: unlisted YouTube video, one link only, English, recorded against
+the **production** domain, and the browser URL bar must be visible so the
+reviewer can read the OAuth client ID during consent.
+
+### Shot list and narration script
+
+**1. Show the client ID (10s).** Screen-record the Cloud Console client page with
+the client ID visible.
+
+> "This is the Inbox Chief OAuth client, ID 515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls, in project gen-lang-client-0169179372."
+
+**2. Show the homepage (15s).** Load `https://inboxchief.com` with the URL bar visible.
+
+> "Inbox Chief is an accessibility-first email assistant for blind and low-vision users. It reads email aloud over the phone and never sends anything without spoken approval."
+
+**3. Start the OAuth flow (30s).** Sign in, go to Settings, click **Connect Gmail**.
+Keep the URL bar visible through the whole redirect.
+
+> "The patron taps Connect Gmail. This starts the Google OAuth flow from our production domain."
+
+**4. The consent screen (30s).** Slowly scroll the Google consent screen so every
+requested scope is legible.
+
+> "Google asks the user to approve read access to Gmail and permission to send mail only after approval. The user grants consent here. Nothing happens before this approval."
+
+**5. gmail.readonly in use (45s).** Back in the app, show the inbox populated. Then
+place a real call to +1 405 716 9240 from the registered phone and say
+"read my emails" — capture the audio of the assistant reading a real message aloud.
+
+> "This is gmail.readonly in use. The assistant retrieves the sender, subject, and full body of the patron's own message and reads it aloud, because the patron cannot see the screen."
+
+**6. gmail.send in use (45s).** On the call, ask the assistant to reply. Let it read
+the draft back, then give the spoken confirmation, and show the sent message.
+
+> "For sending, the assistant reads the draft back and waits for an explicit spoken confirmation. Only after this second confirmation does Inbox Chief use gmail.send to deliver the message. This is the only path that sends mail."
+
+**7. Revocation and deletion (30s).** In Settings, show **Disconnect**, then the
+one-button **Schedule account deletion** with its cooling-off notice.
+
+> "The patron can disconnect the mailbox at any time, which revokes our Google token, or delete the account entirely with a seven-day cooling-off period that removes their data."
+
+Upload as **Unlisted**, then paste the link into the Verification Center.
+
+---
+
+## Step 8 — Submit, then the security assessment
+
+1. Open the Verification Center:
+   https://console.cloud.google.com/auth/verification?project=gen-lang-client-0169179372
+2. Confirm **Branding status** is published first — data-access verification cannot
+   be requested until branding is approved.
+3. Fill in the scope justifications (Step 5) and the demo video link (Step 7).
+4. Click **Submit for verification**.
+5. Watch the inbox of `eddie@bannermanmenson.com` — all reviewer correspondence
+   goes to project owners/editors by email, and unanswered questions stall the review.
+6. **CASA security assessment.** Because Inbox Chief requests a restricted scope
+   *and* stores Google user data on a server (encrypted refresh tokens and message
+   text in Postgres), a security assessment by a Google-empanelled third-party
+   assessor is required. The review team emails you when it is time to begin.
+   It is a paid, annual engagement — budget money and calendar time for it.
+
+### Expected timeline
+
+| Stage | Realistic duration |
+| --- | --- |
+| Domain purchase + Search Console verification | Same day |
+| Brand verification | Days to ~2 weeks |
+| Restricted-scope review | ~6 weeks (Google's own published figure) |
+| CASA security assessment | Several weeks, runs in parallel/after; repeats annually |
+
+Plan on **two to three months** before a brand-new Gmail can connect without
+being a test user. Keep onboarding patrons via the test-user path meanwhile.
+
+---
+
+## Step 9 — Flip the flag
+
+Only when publishing status is **In production**, verification is approved, **and**
+a brand-new Gmail that is *not* in the test-user list connects cleanly:
+
+Set in Vercel (Production + Preview):
+
+```
+GOOGLE_OAUTH_PUBLISHED=true
+```
+
+Then redeploy. That single flag is now the only switch. `NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED`
+is no longer read by anything and can be deleted.
+
+Flipping it automatically:
+
+- Removes the "Google will show an unverified app notice — choose Advanced, then Continue"
+  guidance from the setup page, Settings, and the spoken phone prompts.
+- Stops creating test-user gates for new voice signups, so `provision_signup` hands
+  patrons straight to Google consent.
+- Hides the operator test-user queue and checklist.
+- Reports `googleOauthPublished: true` at `/api/health`.
+
+Verify after deploy:
+
+```bash
+curl -s https://inboxchief.com/api/health | grep googleOauthPublished
+```
+
+---
+
+## While you wait: adding a test user (2 minutes per patron)
+
+Google's 100-test-user cap applies, which is far above the near-term target.
+
+1. Patron calls +1 405 716 9240 and completes voice signup. Their Gmail lands in
+   the pending queue automatically — no data entry by you.
+2. Open https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
+3. **Add users** → paste the Gmail → **Save**.
+4. Open https://inbox-chief-kappa.vercel.app/dashboard/admin/onboard → in
+   **Pending voice signups**, use **Copy Gmail** to get the exact address, then
+   check **Mark Gmail enabled**.
+5. The patron's SMS magic link (or spoken short code) now goes straight to Google
+   consent. Nothing else to send them.

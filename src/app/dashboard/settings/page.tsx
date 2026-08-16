@@ -4,6 +4,7 @@ import { CallCostsTally } from "@/components/call-in/call-costs-tally";
 import { CallInPhoneForm } from "@/components/call-in/call-in-phone-form";
 import { CallInReadinessBanner } from "@/components/call-in/call-in-readiness-banner";
 import { CallInVoiceSettings } from "@/components/call-in/call-in-voice-settings";
+import { EmailCallAlertSettings } from "@/components/call-in/email-call-alert-settings";
 import { OperatorHealthBanner } from "@/components/admin/operator-health-banner";
 import { AccountDataPanel } from "@/components/settings/account-data-panel";
 import { AnalyticsPrivacyPanel } from "@/components/settings/analytics-privacy-panel";
@@ -11,6 +12,7 @@ import { OperatorSetupPanel } from "@/components/settings/operator-setup-panel";
 import { TeamInvitePanel } from "@/components/settings/team-invite-panel";
 import { AccessibilityControls } from "@/components/a11y/accessibility-controls";
 import { VoiceLearningPanel } from "@/components/settings/voice-learning-panel";
+import { CalendarConnectPanel } from "@/components/settings/calendar-connect-panel";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
@@ -31,7 +33,9 @@ export default function SettingsPage() {
       <CallInReadinessBanner />
       <OperatorSetupPanel />
       <MailboxConnectPanel />
+      <CalendarConnectPanel />
       <CallInPhoneForm />
+      <EmailCallAlertSettings />
       <CallInVoiceSettings />
       <CallCostsTally />
       <TeamInvitePanel />

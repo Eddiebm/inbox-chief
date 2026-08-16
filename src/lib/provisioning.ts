@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
+import type { PrismaClient } from "@/generated/prisma/client";
 import {
   normalizePhoneE164,
   phoneE164Candidates,
 } from "@/lib/call-in/identity";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 
 const MAGIC_LINK_TTL_SECONDS = 24 * 60 * 60;
 const SHORT_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -28,6 +30,7 @@ export type ProvisionSignupResult = {
   shortCode: string;
   magicLink: string;
   provisionUrl: string;
+  provisionEntryUrl: string;
   status: ProvisioningStatus;
   created: boolean;
 };
@@ -120,6 +123,101 @@ async function linksForRequest(input: {
   return {
     magicLink: `${base}/api/provision/connect?token=${encodeURIComponent(token)}`,
     provisionUrl: `${base}/provision/${input.shortCode}`,
+    // Spoken fallback: caller types this, then keys the short code.
+    provisionEntryUrl: `${base}/provision`,
+  };
+}
+
+type HandoffIdentity = {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  userId: string;
+  mailboxId: string | null;
+};
+
+/**
+ * Return (or lazily rebuild) the ProvisioningRequest handoff for an existing
+ * voice identity. A returning caller always gets a fresh magic link/short code
+ * for the same account instead of a hard "already in use" rejection.
+ */
+async function handoffForExistingIdentity(
+  prisma: PrismaClient,
+  identity: HandoffIdentity,
+  gmail: string,
+  phoneE164: string,
+): Promise<ProvisionSignupResult> {
+  const request = await prisma.provisioningRequest.findUnique({
+    where: { callInIdentityId: identity.id },
+  });
+  if (request) {
+    const links = await linksForRequest(request);
+    return {
+      requestId: request.id,
+      userId: request.userId,
+      phoneE164: request.phoneE164,
+      gmail: request.gmail,
+      shortCode: request.shortCode,
+      ...links,
+      status: provisioningStatus(request),
+      created: false,
+    };
+  }
+
+  const mailbox = identity.mailboxId
+    ? await prisma.mailbox.findFirst({
+        where: {
+          id: identity.mailboxId,
+          organizationId: identity.organizationId,
+          workspaceId: identity.workspaceId,
+          ownerId: identity.userId,
+        },
+        select: { id: true, connectionStatus: true },
+      })
+    : await prisma.mailbox.findFirst({
+        where: {
+          organizationId: identity.organizationId,
+          workspaceId: identity.workspaceId,
+          ownerId: identity.userId,
+        },
+        orderBy: { updatedAt: "desc" },
+        select: { id: true, connectionStatus: true },
+      });
+  const connected = mailbox?.connectionStatus.toLowerCase() === "connected";
+  const needsGoogleTestUser = !connected && !isGoogleOauthPublished();
+  const restored = await prisma.provisioningRequest.upsert({
+    where: { callInIdentityId: identity.id },
+    update: {},
+    create: {
+      organizationId: identity.organizationId,
+      workspaceId: identity.workspaceId,
+      userId: identity.userId,
+      callInIdentityId: identity.id,
+      gmail,
+      phoneE164,
+      shortCode: createShortCode(),
+      needsGoogleTestUser,
+      googleTestUserEnabled: connected || !needsGoogleTestUser,
+      provisionedReady: connected,
+      connectedAt: connected ? new Date() : null,
+    },
+  });
+  if (mailbox?.id && identity.mailboxId !== mailbox.id) {
+    await prisma.callInIdentity.update({
+      where: { id: identity.id },
+      data: { mailboxId: mailbox.id },
+    });
+  }
+  const links = await linksForRequest(restored);
+  return {
+    requestId: restored.id,
+    userId: restored.userId,
+    phoneE164: restored.phoneE164,
+    gmail: restored.gmail,
+    shortCode: restored.shortCode,
+    ...links,
+    status: provisioningStatus(restored),
+    created: false,
   };
 }
 
@@ -142,94 +240,42 @@ export async function provisionSignup(
     orderBy: { updatedAt: "desc" },
   });
   if (existingIdentity) {
-    const [user, request] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: existingIdentity.userId },
-        select: { email: true },
-      }),
-      prisma.provisioningRequest.findUnique({
-        where: { callInIdentityId: existingIdentity.id },
-      }),
-    ]);
-    if (user?.email.toLowerCase() !== gmail) throw new Error("phone_in_use");
-    if (request) {
-      const links = await linksForRequest(request);
-      return {
-        requestId: request.id,
-        userId: request.userId,
-        phoneE164: request.phoneE164,
-        gmail: request.gmail,
-        shortCode: request.shortCode,
-        ...links,
-        status: provisioningStatus(request),
-        created: false,
-      };
-    }
-
-    const mailbox = existingIdentity.mailboxId
-      ? await prisma.mailbox.findFirst({
-          where: {
-            id: existingIdentity.mailboxId,
-            organizationId: existingIdentity.organizationId,
-            workspaceId: existingIdentity.workspaceId,
-            ownerId: existingIdentity.userId,
-          },
-          select: { id: true, connectionStatus: true },
-        })
-      : await prisma.mailbox.findFirst({
-          where: {
-            organizationId: existingIdentity.organizationId,
-            workspaceId: existingIdentity.workspaceId,
-            ownerId: existingIdentity.userId,
-          },
-          orderBy: { updatedAt: "desc" },
-          select: { id: true, connectionStatus: true },
-        });
-    const connected =
-      mailbox?.connectionStatus.toLowerCase() === "connected";
-    const needsGoogleTestUser =
-      !connected && process.env.GOOGLE_OAUTH_PUBLISHED !== "true";
-    const restored = await prisma.provisioningRequest.upsert({
-      where: { callInIdentityId: existingIdentity.id },
-      update: {},
-      create: {
-        organizationId: existingIdentity.organizationId,
-        workspaceId: existingIdentity.workspaceId,
-        userId: existingIdentity.userId,
-        callInIdentityId: existingIdentity.id,
-        gmail,
-        phoneE164,
-        shortCode: createShortCode(),
-        needsGoogleTestUser,
-        googleTestUserEnabled: connected || !needsGoogleTestUser,
-        provisionedReady: connected,
-        connectedAt: connected ? new Date() : null,
-      },
+    const user = await prisma.user.findUnique({
+      where: { id: existingIdentity.userId },
+      select: { email: true },
     });
-    if (mailbox?.id && existingIdentity.mailboxId !== mailbox.id) {
-      await prisma.callInIdentity.update({
-        where: { id: existingIdentity.id },
-        data: { mailboxId: mailbox.id },
-      });
-    }
-    const links = await linksForRequest(restored);
-    return {
-      requestId: restored.id,
-      userId: restored.userId,
-      phoneE164: restored.phoneE164,
-      gmail: restored.gmail,
-      shortCode: restored.shortCode,
-      ...links,
-      status: provisioningStatus(restored),
-      created: false,
-    };
+    if (user?.email.toLowerCase() !== gmail) throw new Error("phone_in_use");
+    return handoffForExistingIdentity(
+      prisma,
+      existingIdentity,
+      gmail,
+      phoneE164,
+    );
   }
 
   const existingUser = await prisma.user.findUnique({
     where: { email: gmail },
     select: { id: true },
   });
-  if (existingUser) throw new Error("email_in_use");
+  if (existingUser) {
+    // Same Gmail, but caller ID did not match an enabled identity (e.g. a
+    // disabled identity or a new phone). Hand the existing voice account a
+    // fresh link rather than rejecting the caller with "email in use".
+    const priorIdentity = await prisma.callInIdentity.findFirst({
+      where: { userId: existingUser.id },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (priorIdentity) {
+      return handoffForExistingIdentity(
+        prisma,
+        priorIdentity,
+        gmail,
+        phoneE164,
+      );
+    }
+    // No voice identity at all — this is a web-only account we must not hijack.
+    throw new Error("email_in_use");
+  }
 
   const ownerRole = await prisma.role.upsert({
     where: { key: "workspace_owner" },
@@ -245,7 +291,7 @@ export async function provisionSignup(
     select: { id: true },
   });
   const shortCode = createShortCode();
-  const needsGoogleTestUser = process.env.GOOGLE_OAUTH_PUBLISHED !== "true";
+  const needsGoogleTestUser = !isGoogleOauthPublished();
 
   const created = await prisma.$transaction(async (tx) => {
     const organization = await tx.organization.create({

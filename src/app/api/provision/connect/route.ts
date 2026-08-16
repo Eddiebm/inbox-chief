@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createSession } from "@/lib/auth";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 import {
   findProvisioningByCode,
   verifyProvisioningMagicToken,
@@ -54,6 +55,7 @@ export async function GET(request: Request) {
       );
     }
     if (
+      !isGoogleOauthPublished() &&
       provision.needsGoogleTestUser &&
       !provision.googleTestUserEnabled
     ) {

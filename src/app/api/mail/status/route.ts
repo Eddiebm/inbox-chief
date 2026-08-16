@@ -6,6 +6,7 @@ import { IMAP_PRESETS } from "@/lib/mail/providers/presets";
 import { getGmailOAuthConfig } from "@/lib/gmail/config";
 import { getOutlookOAuthConfig } from "@/lib/outlook/config";
 import { mailClientMayAutoSend } from "@/lib/mail/never-send";
+import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 
 /**
  * Multi-provider mailbox status for the Settings connect panel.
@@ -25,6 +26,7 @@ export async function GET() {
     oauth: {
       gmail: gmailConfig.ok,
       outlook: outlookConfig.ok,
+      googleOauthPublished: isGoogleOauthPublished(),
       gmailMessage: gmailConfig.ok
         ? null
         : "Inbox Chief isn’t ready to connect Gmail yet. Please contact support.",
@@ -79,9 +81,7 @@ export async function GET() {
     },
   });
 
-  const connectedMailboxes = mailboxes
-    .filter((m) => m.connectionStatus === "connected")
-    .map((m) => ({
+  const visibleMailboxes = mailboxes.map((m) => ({
       id: m.id,
       emailAddress: m.emailAddress,
       provider: m.provider,
@@ -93,8 +93,10 @@ export async function GET() {
 
   return NextResponse.json({
     ...base,
-    connected: connectedMailboxes.length > 0,
-    mailboxes: connectedMailboxes,
+    connected: visibleMailboxes.some(
+      (mailbox) => mailbox.connectionStatus === "connected",
+    ),
+    mailboxes: visibleMailboxes,
     organizationId: scope.organizationId,
     workspaceId: scope.workspaceId,
   });

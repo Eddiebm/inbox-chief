@@ -2,6 +2,36 @@
 
 Inbox Chief’s phone path prefers **VAPI**. Twilio remains available as a fallback webhook.
 
+## Outbound calls for new Primary mail
+
+Pro and Business subscribers can opt in under **Settings → Email call alerts**
+or **Call in → Email call alerts**. Patron sees the disabled control with an
+upgrade link. The preference is off by default and requires a saved
+`CallInIdentity` phone plus a connected Gmail mailbox. Both the settings API and
+sync trigger enforce the plan gate.
+
+After Gmail sync inserts new messages, Inbox Chief counts only Primary mail and
+creates an outbound call with `POST https://api.vapi.ai/call`, the configured
+VAPI phone-number ID, assistant ID, and `customer.number` set to the subscriber's
+saved E.164 phone. Calls are batched with a durable 15-minute cooldown. They are
+skipped when there is no new Primary mail, the preference is off, the mailbox is
+disconnected, the phone is missing, or included call minutes are exhausted.
+Promotions, social, updates, forums, spam, and previously stored messages do not
+trigger the call.
+
+Opening example: “You have 2 new emails in Primary. The newest is from Jordan
+Lee about Schedule confirmation. Say read the new ones.” Only the newest
+Primary sender and subject are announced before consent to read; the existing
+call-in tools provide the real tenant-scoped mail and the call never sends email.
+
+Vercel invokes `GET /api/cron/gmail-sync` daily at 15:00 UTC on the current
+Hobby plan (Vercel only permits daily cron there). On Pro, change the schedule
+to `*/5 * * * *` for five-minute polling. The route requires
+`Authorization: Bearer $CRON_SECRET`, selects only opted-in identities, and
+re-validates organization, workspace, mailbox, owner, and connected status
+before each sync. Configure `CRON_SECRET` in production; Vercel adds this header
+automatically for cron invocations.
+
 ## Production dial-in number
 
 **+1 (405) 716-9240** (`+14057169240`)
@@ -37,6 +67,27 @@ On `end-of-call-report`, Inbox Chief stores **call cost in USD** (VAPI `cost` / 
 **Accessibility (blind patrons):** briefing and “read my emails” speak messages **one at a time** — From, Subject, then body or snippet — then pause for next / more detail / draft in the app. **Nothing sends email from a call.**
 
 Tool results include per-email readable text (prefer `bodyText`, else Gmail/Outlook `snippet`). If only metadata exists, the assistant says so and still reads subject/from.
+
+### Selecting messages to read
+
+The readable window contains up to 20 messages and is newest-first by default. Every
+selection gets a short spoken confirmation, then `Email N of M` numbering relative
+to that selection. “Next” stays in the active selection.
+
+- “Read the first 10” reads the 10 most recent messages.
+- “Read the last 10” and “read the oldest 10” read the oldest 10 in the window,
+  oldest first.
+- “Read the new 3” reads up to 3 Primary messages received after
+  `CallInIdentity.lastSuccessfulCallAt`; “just the new ones” reads all that match.
+- “Read number 4” reads only item 4. A following “next” continues with the item
+  after number 4.
+- “Read the next 3” selects the next 3 after the message most recently read.
+
+Counts are clamped to 1–20 and to the messages actually available. The spoken
+result states the real count when the request is larger. “New” with no matches
+says there are no new emails and never substitutes old or non-Primary mail.
+Primary remains the default; explicit promotions/everything requests can be
+combined with a count.
 
 ## Env
 

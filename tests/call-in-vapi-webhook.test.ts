@@ -74,6 +74,22 @@ describe("VAPI call-in webhook tool routing", () => {
     expect(handled.spoken).toMatch(/read email 1|read my emails|Nothing sends/i);
   });
 
+  it("first briefing tool result includes the new-Primary count", async () => {
+    const handled = await handleCallInTool({
+      name: "get_briefing",
+      snapshot: {
+        ...snap,
+        newPrimaryCount: 2,
+        isFirstSuccessfulCall: false,
+        newPrimaryAnnouncement:
+          "You have 2 new emails in Primary since your last call.",
+      },
+    });
+    expect(handled.spoken).toMatch(
+      /^You have 2 new emails in Primary since your last call\./,
+    );
+  });
+
   it("read_emails respects startIndex for next-email flow", async () => {
     const handled = await handleCallInTool({
       name: "read_emails",
@@ -99,12 +115,12 @@ describe("VAPI call-in webhook tool routing", () => {
   });
 
   it("rejects forbidden send tools (never-send invariant)", async () => {
-    expect(isForbiddenSendTool("send_email")).toBe(true);
+    expect(isForbiddenSendTool("send_message")).toBe(true);
     expect(isForbiddenSendTool("approve_and_send")).toBe(true);
     expect(isForbiddenSendTool("get_briefing")).toBe(false);
 
     const handled = await handleCallInTool({
-      name: "send_email",
+      name: "send_message",
       args: { to: "x@example.com", body: "hi" },
       snapshot: snap,
     });
@@ -128,7 +144,7 @@ describe("VAPI call-in webhook tool routing", () => {
           { id: "tc_brief", name: "get_briefing", arguments: {} },
           {
             id: "tc_send",
-            name: "send_email",
+            name: "send_message",
             arguments: { to: "victim@example.com" },
           },
           {
@@ -187,8 +203,9 @@ describe("VAPI call-in webhook tool routing", () => {
     expect(prompt).toMatch(/CNAM/i);
     expect(prompt).toMatch(/VERBATIM/i);
     expect(prompt).toMatch(/Never invent demo/i);
-    expect(prompt).toMatch(/do not skip attachments/i);
-    expect(prompt).toMatch(/Never invent attachment contents/i);
+    expect(prompt).toMatch(/ATTACHMENT CONSENT/i);
+    expect(prompt).toMatch(/never.*extract attachment contents/i);
+    expect(prompt).toMatch(/never hallucinate content/i);
     expect(prompt).not.toMatch(/still answer with available demo/i);
   });
 
@@ -267,7 +284,7 @@ describe("VAPI call-in webhook tool routing", () => {
     expect(parsed.args.question).toBe("Any drafts?");
   });
 
-  it("end-of-call acknowledges no email sent and attempts cost capture", async () => {
+  it("end-of-call records cost without contradicting confirmed sends", async () => {
     process.env.MOCK_INTEGRATIONS = "true";
     const result = await handleVapiCallInWebhook({
       message: {
@@ -287,7 +304,7 @@ describe("VAPI call-in webhook tool routing", () => {
       costRecorded: false,
     });
     if ("note" in result) {
-      expect(result.note?.toLowerCase()).toMatch(/no email was sent/);
+      expect(result.note?.toLowerCase()).toMatch(/explicit read-back confirmation/);
     }
   });
 });

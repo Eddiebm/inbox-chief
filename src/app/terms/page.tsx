@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: `The terms that govern your use of ${product.name}.`,
 };
 
-const LAST_UPDATED = "August 14, 2026";
+const LAST_UPDATED = "August 15, 2026";
 
 export default function TermsPage() {
   return (
@@ -49,9 +49,11 @@ export default function TermsPage() {
 
           <h2>Human approval and outbound email</h2>
           <p>
-            {product.name} <strong>never sends email automatically</strong>. Any
-            message is sent only after you explicitly approve it. You are
-            responsible for the content you approve and send.
+            {product.name} <strong>does not send email automatically</strong>.
+            Where outbound sending is available, it requires you to approve the
+            draft and then separately confirm Send. Call-in, mailbox sync, and
+            draft creation do not send email. You are responsible for content
+            you approve and send.
           </p>
 
           <h2>Acceptable use</h2>
@@ -90,8 +92,8 @@ export default function TermsPage() {
           <p>
             We may update these Terms or the Service. If changes are material, we
             will provide notice. We may suspend or terminate access for violations
-            of these Terms. You may stop using the Service and delete your account
-            at any time.
+            of these Terms. You may stop using the Service at any time and may
+            request account deletion through Settings or by contacting us.
           </p>
 
           <h2>Contact</h2>

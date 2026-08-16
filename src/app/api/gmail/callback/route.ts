@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { connectMailbox, syncMailbox } from "@/lib/gmail/client";
 import { verifyGmailOAuthState } from "@/lib/gmail/oauth-state";
 import { markProvisioningConnected } from "@/lib/provisioning";
+import { connectCalendar } from "@/lib/calendar";
 
 function appOrigin() {
   return (
@@ -63,6 +64,16 @@ export async function GET(request: Request) {
     const state = await verifyGmailOAuthState(stateToken);
     if (state.returnTo) returnTo = state.returnTo;
 
+    if (state.purpose === "calendar") {
+      await connectCalendar({
+        organizationId: state.organizationId,
+        workspaceId: state.workspaceId,
+        userId: state.userId,
+        authorizationCode: code,
+      });
+      return oauthRedirect(returnTo, { calendar: "connected" });
+    }
+
     const connected = await connectMailbox({
       organizationId: state.organizationId,
       workspaceId: state.workspaceId,
@@ -86,14 +97,13 @@ export async function GET(request: Request) {
       mailboxId: connected.mailboxId,
     });
 
-    // Optional light sync — metadata only; never send.
+    // First sync — Primary-first depth so a call-in can walk the inbox. Never sends.
     try {
       await syncMailbox({
         organizationId: state.organizationId,
         workspaceId: state.workspaceId,
         mailboxId: connected.mailboxId,
         userId: state.userId,
-        maxResults: 25,
       });
     } catch (syncError) {
       console.error("gmail_light_sync_failed", syncError);

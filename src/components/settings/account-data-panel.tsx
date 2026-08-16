@@ -26,8 +26,7 @@ export function AccountDataPanel() {
   const [deleteStatus, setDeleteStatus] = useState(
     `Account deletion uses a ${DELETION_COOL_OFF_DAYS}-day cooling-off period. Nothing is erased immediately.`,
   );
-  const [confirmEmail, setConfirmEmail] = useState("");
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [deletionScheduled, setDeletionScheduled] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
@@ -49,6 +48,20 @@ export function AccountDataPanel() {
           organizationId: data.organizationId ?? null,
           message: data.message,
         });
+        if (!data.isMock && data.organizationId) {
+          const deletionRes = await fetch("/api/account/delete");
+          const deletion = (await deletionRes.json()) as {
+            scheduled?: boolean;
+            coolOffEndsAt?: string | null;
+          };
+          if (cancelled) return;
+          setDeletionScheduled(Boolean(deletion.scheduled));
+          if (deletion.scheduled && deletion.coolOffEndsAt) {
+            setDeleteStatus(
+              `Deletion is scheduled for ${new Date(deletion.coolOffEndsAt).toLocaleString()}. You can cancel it now.`,
+            );
+          }
+        }
       } catch {
         if (!cancelled) {
           setSession({
@@ -81,17 +94,13 @@ export function AccountDataPanel() {
     try {
       const res = await fetch("/api/account/export", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          organizationId,
-          callerOrganizationId: organizationId,
-        }),
       });
       const data = (await res.json()) as {
         ok?: boolean;
         error?: string;
         message?: string;
         expiresAt?: string;
+        downloadUrl?: string;
       };
       if (!res.ok || !data.ok) {
         setExportStatus(data.error ?? "Could not request a data export.");
@@ -99,8 +108,16 @@ export function AccountDataPanel() {
       }
       setExportStatus(
         data.message ??
-          `Export queued. Download expires ${data.expiresAt ? `around ${new Date(data.expiresAt).toLocaleString()}` : "in 48 hours"}.`,
+          `Export ready. Download expires ${data.expiresAt ? `around ${new Date(data.expiresAt).toLocaleString()}` : "in 48 hours"}.`,
       );
+      if (data.downloadUrl) {
+        const link = document.createElement("a");
+        link.href = data.downloadUrl;
+        link.download = "";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
     } catch {
       setExportStatus("Network error requesting export.");
     } finally {
@@ -116,28 +133,11 @@ export function AccountDataPanel() {
       return;
     }
 
-    if (
-      typeof window !== "undefined" &&
-      !window.confirm(
-        `Schedule deletion of your ${product.name} account? You will have ${DELETION_COOL_OFF_DAYS} days to cancel before data is removed.`,
-      )
-    ) {
-      return;
-    }
-
     setDeleteBusy(true);
     setDeleteStatus("Scheduling deletion…");
     try {
       const res = await fetch("/api/account/delete", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          organizationId,
-          callerOrganizationId: organizationId,
-          confirmEmail,
-          accountEmail,
-          acknowledged,
-        }),
       });
       const data = (await res.json()) as {
         ok?: boolean;
@@ -149,8 +149,7 @@ export function AccountDataPanel() {
         setDeleteStatus(data.error ?? "Could not schedule account deletion.");
         return;
       }
-      setConfirmEmail("");
-      setAcknowledged(false);
+      setDeletionScheduled(true);
       setDeleteStatus(
         data.message ??
           (data.coolOffEndsAt
@@ -159,6 +158,31 @@ export function AccountDataPanel() {
       );
     } catch {
       setDeleteStatus("Network error scheduling deletion.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
+
+  async function cancelDeletion() {
+    setDeleteBusy(true);
+    setDeleteStatus("Keeping your account…");
+    try {
+      const res = await fetch("/api/account/delete", { method: "DELETE" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setDeleteStatus(data.error ?? "Could not cancel account deletion.");
+        return;
+      }
+      setDeletionScheduled(false);
+      setDeleteStatus(
+        data.message ?? "Account deletion canceled. Your account will stay active.",
+      );
+    } catch {
+      setDeleteStatus("Network error while keeping your account.");
     } finally {
       setDeleteBusy(false);
     }
@@ -186,7 +210,7 @@ export function AccountDataPanel() {
         <p>
           {isMock || !organizationId
             ? "Sign in with a real account to request an export of your organization data."
-            : `We queue a downloadable archive for your organization. Links expire after ${EXPORT_EXPIRY_HOURS} hours.`}
+            : `Download your account, mailbox, mail metadata, contacts, and audit history. Links expire after ${EXPORT_EXPIRY_HOURS} hours.`}
         </p>
         <button
           type="button"
@@ -195,7 +219,7 @@ export function AccountDataPanel() {
           aria-busy={exportBusy}
           onClick={() => void requestExport()}
         >
-          {exportBusy ? "Requesting…" : "Request data export"}
+          {exportBusy ? "Preparing…" : "Download data export"}
         </button>
         <p className="status-line" role="status" aria-live="polite">
           {exportStatus}
@@ -207,46 +231,24 @@ export function AccountDataPanel() {
         <p>
           {isMock || !accountEmail
             ? "Sign in with a real account to schedule deletion."
-            : `Type your account email (${accountEmail}) and acknowledge the cooling-off period. Deletion is never immediate.`}
+            : `One button schedules deletion. Your account stays active for ${DELETION_COOL_OFF_DAYS} days, and you can cancel during that time.`}
         </p>
-        <label className="account-data-field">
-          Confirm email
-          <input
-            type="email"
-            autoComplete="email"
-            value={confirmEmail}
-            onChange={(e) => setConfirmEmail(e.target.value)}
-            disabled={deleteBusy || isMock}
-            placeholder={accountEmail ?? "your@email.com"}
-            aria-describedby="delete-heading"
-          />
-        </label>
-        <label className="consent-check">
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            disabled={deleteBusy || isMock}
-          />
-          <span>
-            I understand deletion starts a {DELETION_COOL_OFF_DAYS}-day
-            cooling-off period and is scoped only to my organization.
-          </span>
-        </label>
         <button
           type="button"
-          className="btn-danger"
-          disabled={
-            deleteBusy ||
-            isMock ||
-            !acknowledged ||
-            !confirmEmail.trim() ||
-            !organizationId
-          }
+          className={deletionScheduled ? "btn-primary" : "btn-danger"}
+          disabled={deleteBusy || isMock || !organizationId}
           aria-busy={deleteBusy}
-          onClick={() => void scheduleDeletion()}
+          onClick={() =>
+            void (deletionScheduled ? cancelDeletion() : scheduleDeletion())
+          }
         >
-          {deleteBusy ? "Scheduling…" : "Schedule account deletion"}
+          {deleteBusy
+            ? deletionScheduled
+              ? "Keeping account…"
+              : "Scheduling…"
+            : deletionScheduled
+              ? "Cancel deletion and keep my account"
+              : "Schedule account deletion"}
         </button>
         <p className="status-line" role="status" aria-live="polite">
           {deleteStatus}

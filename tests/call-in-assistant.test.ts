@@ -79,6 +79,19 @@ describe("anytime call-in assistant", () => {
     expect(openingPrompt(snap)).toMatch(/read your emails|anytime/i);
   });
 
+  it("includes the exact new-Primary announcement in the opening", () => {
+    const opening = openingPrompt({
+      ...snap,
+      newPrimaryCount: 3,
+      isFirstSuccessfulCall: false,
+      newPrimaryAnnouncement:
+        "You have 3 new emails in Primary since your last call.",
+    });
+    expect(opening).toContain(
+      "You have 3 new emails in Primary since your last call.",
+    );
+  });
+
   it("answers briefing with subjects-first then offer full read", () => {
     const a = answerCallInQuestion("Give me a briefing", snap);
     expect(a.intent).toBe("briefing");

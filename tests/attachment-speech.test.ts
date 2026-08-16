@@ -141,6 +141,61 @@ trailer<<>>
         "a.docx",
       ),
     ).toBe("Word document");
+    expect(
+      speakableAttachmentType(
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "deck.pptx",
+      ),
+    ).toBe("PowerPoint");
+  });
+
+  it("extracts PPTX slide text in order with slide labels", async () => {
+    const JSZip = (await import("jszip")).default;
+    const zip = new JSZip();
+    const slideXml = (title: string, body: string) =>
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+ xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld><p:spTree>
+    <p:sp><p:txBody><a:p><a:r><a:t>${title}</a:t></a:r></a:p>
+      <a:p><a:r><a:t>${body}</a:t></a:r></a:p></p:txBody></p:sp>
+  </p:spTree></p:cSld>
+</p:sld>`;
+    // Intentionally add slide 2 before slide 1 in the zip to prove numeric ordering
+    zip.file("ppt/slides/slide2.xml", slideXml("Budget", "Q3 forecast"));
+    zip.file("ppt/slides/slide1.xml", slideXml("Agenda", "Welcome &amp; overview"));
+    zip.file(
+      "[Content_Types].xml",
+      `<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>`,
+    );
+    const bytes = Buffer.from(await zip.generateAsync({ type: "nodebuffer" }));
+
+    const result = await extractAttachmentText({
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      filename: "weekly.pptx",
+      bytes,
+    });
+    expect(result.status).toBe("ok");
+    expect(result.speakableType).toBe("PowerPoint");
+    expect(result.text).toMatch(/^Slide 1\. Agenda Welcome & overview/);
+    expect(result.text).toMatch(/Slide 2\. Budget Q3 forecast/);
+    // Slide 1 content must appear before Slide 2
+    expect(result.text.indexOf("Slide 1.")).toBeLessThan(
+      result.text.indexOf("Slide 2."),
+    );
+  });
+
+  it("rejects legacy .ppt with a clear pptx-only message", async () => {
+    const result = await extractAttachmentText({
+      mimeType: "application/vnd.ms-powerpoint",
+      filename: "old.ppt",
+      bytes: Buffer.from("MSCF-not-a-real-ppt"),
+    });
+    expect(result.status).toBe("unsupported");
+    expect(result.speakableType).toBe("PowerPoint");
+    expect(result.reason).toMatch(/\.pptx/i);
+    expect(result.reason).toMatch(/not older \.ppt/i);
   });
 });
 
@@ -175,7 +230,7 @@ describe("attachment speech formatting", () => {
     expect(spoken).toMatch(/can't read the picture text yet/i);
   });
 
-  it("includes attachments after body in email speech", () => {
+  it("announces attachments after body without reading contents", () => {
     const email: CallInReadableEmail = {
       fromAddress: "Jordan <j@example.com>",
       subject: "Docs",
@@ -196,10 +251,12 @@ describe("attachment speech formatting", () => {
     const line = formatReadableEmailForSpeech(email, 1, 1);
     expect(line).toMatch(/Message: Please see the attached agenda/i);
     expect(line).toMatch(/This email has 1 attachment/i);
-    expect(line).toMatch(/Contents: Agenda item one/i);
+    expect(line).toMatch(/agenda\.pdf, PDF/i);
+    expect(line).toMatch(/read it in full.*extractive summary.*skip/i);
+    expect(line).not.toMatch(/Agenda item one/i);
   });
 
-  it("offers say more when remaining text exists", () => {
+  it("reads a short attachment all the way through in one turn", () => {
     const spoken = formatAttachmentsForSpeech([
       {
         filename: "long.txt",
@@ -211,7 +268,34 @@ describe("attachment speech formatting", () => {
         remainingText: "Second chunk continues here.",
       },
     ]);
-    expect(spoken).toMatch(/Say more about this attachment/i);
+    expect(spoken).toMatch(/First chunk\. Second chunk continues here\./);
+    expect(spoken).not.toMatch(/words remain/i);
+  });
+
+  it("offers continuation when a file is longer than one turn", () => {
+    const fullText = Array.from(
+      { length: 60 },
+      (_, i) => `Line ${i + 1} of the quarterly report explains the numbers.`,
+    ).join(" ");
+    const spoken = formatAttachmentsForSpeech(
+      [
+        {
+          filename: "report.txt",
+          mimeType: "text/plain",
+          size: fullText.length,
+          speakableType: "text file",
+          status: "ok",
+          readableText: fullText.slice(0, 400),
+          remainingText: fullText.slice(400),
+          fullText,
+        },
+      ],
+      { maxAttachmentTextChars: 600, budgetChars: 900 },
+    );
+    expect(spoken).toMatch(/There is more of report\.txt/i);
+    expect(spoken).toMatch(/words remain/i);
+    expect(spoken).toMatch(/Say continue to hear the rest/i);
+    expect(spoken).toMatch(/say next to skip/i);
   });
 
   it("speakMoreAboutAttachment continues remaining text", () => {

@@ -1,34 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  applyApprovalDecision,
-  confirmSend,
-  demoApprovalQueue,
-  type ApprovalItem,
-} from "@/lib/approvals";
+import { useEffect, useState } from "react";
+import type { ApprovalItem } from "@/lib/approvals";
 import { speak } from "@/lib/voice/speech";
 import { product } from "@/lib/product";
 
-const DEMO_SCOPE = {
-  organizationId: "demo_org",
-  workspaceId: "demo_ws",
-  mailboxId: "demo_mb",
-  userId: "demo_user",
-};
-
 export function ApprovalsPanel() {
-  const initial = useMemo(() => demoApprovalQueue(DEMO_SCOPE), []);
-  const [items, setItems] = useState<ApprovalItem[]>(initial);
+  const [items, setItems] = useState<ApprovalItem[]>([]);
   const [status, setStatus] = useState(
     `${product.name} never sends mail until you approve, then confirm Send.`,
   );
   const [selectedId, setSelectedId] = useState<string | null>(
-    initial[0]?.id ?? null,
+    null,
   );
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
   const awaiting = items.filter((i) => i.status === "AWAITING_APPROVAL");
+
+  useEffect(() => {
+    void fetch("/api/approvals")
+      .then((response) => response.json())
+      .then((data: { items?: Array<Omit<ApprovalItem, "bodyPreview"> & { bodyText: string }> }) => {
+        const loaded = (data.items ?? []).map((item) => ({
+          ...item,
+          bodyPreview: item.bodyText,
+        }));
+        setItems(loaded);
+        setSelectedId(loaded[0]?.id ?? null);
+        setStatus(
+          loaded.length
+            ? `${loaded.length} real draft${loaded.length === 1 ? "" : "s"} loaded. Approve first, then confirm Send.`
+            : "No drafts are waiting. Nothing will be sent.",
+        );
+      })
+      .catch(() => setStatus("Could not load approvals right now."));
+  }, []);
 
   async function announce(message: string) {
     setStatus(message);
@@ -38,11 +44,22 @@ export function ApprovalsPanel() {
   async function decide(decision: "approve" | "reject") {
     if (!selected) return;
     try {
-      const result = applyApprovalDecision(selected, decision, DEMO_SCOPE);
+      const response = await fetch("/api/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selected.id, action: decision }),
+      });
+      if (!response.ok) throw new Error("The draft changed. Reload and try again.");
+      const nextStatus: ApprovalItem["status"] =
+        decision === "approve" ? "APPROVED" : "REJECTED";
       setItems((prev) =>
-        prev.map((i) => (i.id === result.item.id ? result.item : i)),
+        prev.map((i) => (i.id === selected.id ? { ...i, status: nextStatus } : i)),
       );
-      await announce(result.spoken);
+      await announce(
+        decision === "approve"
+          ? `Approved ${selected.subject}. Review it once more, then choose Confirm send. Nothing has been sent yet.`
+          : `Rejected ${selected.subject}. It will not be sent.`,
+      );
     } catch (err) {
       await announce(err instanceof Error ? err.message : "Decision failed.");
     }
@@ -51,11 +68,17 @@ export function ApprovalsPanel() {
   async function sendApproved() {
     if (!selected) return;
     try {
-      const result = confirmSend(selected, DEMO_SCOPE);
+      const response = await fetch("/api/approvals", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selected.id, action: "confirm_send" }),
+      });
+      const data = (await response.json()) as { sent?: { recipient: string }; message?: string };
+      if (!response.ok) throw new Error(data.message ?? "Send blocked.");
       setItems((prev) =>
-        prev.map((i) => (i.id === result.item.id ? result.item : i)),
+        prev.map((i) => (i.id === selected.id ? { ...i, status: "SENT" } : i)),
       );
-      await announce(result.spoken);
+      await announce(`Sent to ${data.sent?.recipient ?? selected.toAddresses.join(", ")}.`);
     } catch (err) {
       await announce(err instanceof Error ? err.message : "Send blocked.");
     }

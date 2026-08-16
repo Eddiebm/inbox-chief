@@ -36,7 +36,7 @@ export function OperatorSetupPanel() {
           fetch("/api/call-in/status"),
         ]);
         const mail = (await mailRes.json()) as {
-          oauth?: { gmail?: boolean };
+          oauth?: { gmail?: boolean; googleOauthPublished?: boolean };
         };
         const call = (await callRes.json()) as {
           numberConfigured?: boolean;
@@ -44,8 +44,7 @@ export function OperatorSetupPanel() {
         };
         if (cancelled) return;
 
-        const oauthPublished =
-          process.env.NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED === "true";
+        const oauthPublished = Boolean(mail.oauth?.googleOauthPublished);
 
         setItems([
           {
@@ -58,11 +57,11 @@ export function OperatorSetupPanel() {
           },
           {
             id: "google-test-user",
-            label: "Google test user / Published",
+            label: "Google restricted-scope verification",
             ok: oauthPublished,
             detail: oauthPublished
-              ? "OAuth app marked published (NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED)."
-              : "Until Published: add each new patron Gmail as a test user before invite. Use Admin onboard.",
+              ? "GOOGLE_OAUTH_PUBLISHED=true — patrons self-serve with no test-user step, and the unverified-app guidance is hidden."
+              : "Until Google verifies: add each new patron Gmail as a test user before invite (Admin onboard). See docs/GOOGLE_OAUTH_PUBLISH.md.",
           },
           {
             id: "vapi-number",

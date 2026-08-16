@@ -9,6 +9,10 @@ import {
 } from "@/lib/call-in/vapi-tools";
 import { resolveCallInVoiceForUser } from "@/lib/call-in/voice-preference";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
+import {
+  googleConsentGuidanceSpoken,
+  isGoogleOauthPublished,
+} from "@/lib/google-oauth-publication";
 import { product } from "@/lib/product";
 import {
   consumeConnectedTip,
@@ -214,9 +218,11 @@ export async function handleVapiCallInWebhook(
           snapshot: resolved.snapshot,
           requestedById: resolved.userId,
           callerPhone,
+          callInIdentityId: resolved.callInIdentityId,
+          callId,
         });
-        // Invariant: emailSent is always false on this path
-        if (handled.emailSent !== false) {
+        // Only the explicit second-stage confirmation tool may report a send.
+        if (handled.emailSent && parsed.name !== "confirm_email_send") {
           results.push({
             toolCallId: parsed.id,
             result: neverSendSpoken(),
@@ -249,10 +255,12 @@ export async function handleVapiCallInWebhook(
     const provisioning = await getProvisioningStatusForPhone(callerPhone);
     if (provisioning?.status === "needs_google_test_user") {
       spoken =
-        "Your account and phone are saved. Your operator still needs to enable this Gmail address. Then open the link we sent or use your short code.";
+        "Your account and phone are saved. Inbox Chief support still needs to enable this Gmail address once. You do not need to change any Google settings. Then open the link we sent or use your short code.";
     } else if (provisioning?.status === "needs_google_consent") {
-      spoken =
-        "Your mailbox isn't connected yet. Open the link we sent, or ask your admin. Your phone is already saved.";
+      const testingGuidance = googleConsentGuidanceSpoken(
+        isGoogleOauthPublished(),
+      );
+      spoken = `Your mailbox isn't connected yet. Open the link we sent or use your short code. Your phone is already saved.${testingGuidance ? ` ${testingGuidance}` : ""}`;
     } else if (
       provisioning?.status === "connected" &&
       resolved.userId &&
@@ -313,7 +321,7 @@ export async function handleVapiCallInWebhook(
       ok: true,
       eventType: type,
       callId,
-      note: "Call ended. No email was sent from this session.",
+      note: "Call ended. Any email send required an explicit read-back confirmation.",
       costRecorded: costResult.recorded,
       costUsd: costResult.costUsd ?? null,
     };

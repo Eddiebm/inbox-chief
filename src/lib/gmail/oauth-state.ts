@@ -9,6 +9,7 @@ export type GmailOAuthStatePayload = {
   nonce: string;
   /** Safe post-OAuth path: /onboarding or /dashboard/settings */
   returnTo?: string;
+  purpose?: "gmail" | "calendar";
 };
 
 const ALLOWED_RETURN_TO = new Set(["/onboarding", "/dashboard/settings"]);
@@ -39,6 +40,7 @@ export async function signGmailOAuthState(
     mailboxId: payload.mailboxId,
     nonce: payload.nonce,
     returnTo: payload.returnTo,
+    purpose: payload.purpose ?? "gmail",
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -66,10 +68,11 @@ export async function verifyGmailOAuthState(
   const returnTo = sanitizeGmailReturnTo(
     payload.returnTo ? String(payload.returnTo) : undefined,
   );
+  const purpose = payload.purpose === "calendar" ? "calendar" : "gmail";
 
   if (!organizationId || !workspaceId || !userId || !nonce) {
     throw new Error("Invalid Gmail OAuth state payload");
   }
 
-  return { organizationId, workspaceId, userId, mailboxId, nonce, returnTo };
+  return { organizationId, workspaceId, userId, mailboxId, nonce, returnTo, purpose };
 }

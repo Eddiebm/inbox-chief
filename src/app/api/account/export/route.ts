@@ -1,40 +1,51 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
-import { requestDataExport } from "@/lib/account/data-requests";
+import { EXPORT_EXPIRY_HOURS } from "@/lib/account/data-requests";
+import { writeAuditLog } from "@/lib/audit";
+import { getCurrentUser } from "@/lib/auth";
+import { getNodePrisma } from "@/lib/db-node";
+import { resolveUserMailboxScope } from "@/lib/mail/tenant-context";
 
-const schema = z.object({
-  organizationId: z.string().min(1),
-  /** Optional caller scope — when present must match organizationId */
-  callerOrganizationId: z.string().min(1).optional(),
-});
-
-export async function POST(request: Request) {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+export async function POST() {
+  const user = await getCurrentUser();
+  if (!user || user.id === "mock_user") {
+    return NextResponse.json({ ok: false, error: "Sign in to export your data." }, { status: 401 });
   }
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: "Invalid request" }, { status: 400 });
+  const scope = await resolveUserMailboxScope(user.id);
+  if (!scope) {
+    return NextResponse.json({ ok: false, error: "Account scope is unavailable." }, { status: 403 });
   }
 
-  const result = requestDataExport({
-    organizationId: parsed.data.organizationId,
-    callerOrganizationId: parsed.data.callerOrganizationId,
+  const expiresAt = new Date(Date.now() + EXPORT_EXPIRY_HOURS * 60 * 60 * 1_000);
+  const prisma = getNodePrisma();
+  const exportRequest = await prisma.dataExportRequest.create({
+    data: {
+      organizationId: scope.organizationId,
+      requestedById: user.id,
+      status: "READY",
+      expiresAt,
+      completedAt: new Date(),
+    },
   });
-
-  if (!result.ok) {
-    const status = result.code === "tenant_mismatch" ? 403 : 400;
-    return NextResponse.json({ error: result.error, code: result.code }, { status });
-  }
+  const downloadUrl = `/api/account/export/${exportRequest.id}`;
+  await prisma.dataExportRequest.update({
+    where: { id: exportRequest.id },
+    data: { downloadUrl },
+  });
+  await writeAuditLog({
+    organizationId: scope.organizationId,
+    workspaceId: scope.workspaceId,
+    actorId: user.id,
+    action: "EXPORT_AUDIT",
+    resourceType: "data_export",
+    resourceId: exportRequest.id,
+    summary: "Created downloadable account data export",
+  });
 
   return NextResponse.json({
     ok: true,
-    status: result.status,
-    organizationId: result.organizationId,
-    expiresAt: result.expiresAt.toISOString(),
-    message: result.message,
+    status: "READY",
+    downloadUrl,
+    expiresAt: expiresAt.toISOString(),
+    message: "Your export is ready. The download link expires after 48 hours.",
   });
 }

@@ -1,3 +1,19 @@
+# Voice send, optional Calendar, and Contacts
+
+- Gmail voice/web sending uses the existing `gmail.send` grant. A draft must be
+  read back or reviewed, then explicitly confirmed in a separate action. There
+  is no automatic-send path.
+- Add `https://www.googleapis.com/auth/calendar.readonly` to the Google OAuth
+  consent-screen scope list for project `gen-lang-client-0169179372` and include
+  it in the pending verification submission. Calendar remains a separate,
+  optional **Connect Calendar** action in Settings; do not add it to Gmail
+  connect.
+- The new Calendar scope may show Google's unverified warning until verification
+  completes and remains subject to the current 100-user cap.
+- Contacts are derived from already-synced mail and require no new Google scope.
+  Google People/Contacts API access is intentionally deferred as a possible
+  future Pro option.
+
 # Operator runbook — Inbox Chief
 
 **Audience:** Eddie / deploy operators only. Patrons never see this.
@@ -74,33 +90,59 @@ before it:
 If SMS is unavailable, no account data is emailed. The spoken short code and
 public provision URL are the fallback handoff.
 
-## Google OAuth — Publish (Eddie only)
+## Google OAuth — ownership + Publish (Eddie only)
 
-**Prod OAuth project:** `inbox-chief-oauth`
-**Prod client ID:** `25385488941-ta679u7okrsndvucqbom0a4rk05nmv95.apps.googleusercontent.com`
-**Status (Aug 14, 2026):** Testing mode. `GOOGLE_OAUTH_PUBLISHED=false`. Only test users can connect.
+**Google account that owns prod OAuth:** `eddie@bannermanmenson.com`
+**Prod OAuth project:** `gen-lang-client-0169179372` (Console name: **Default Gemini Project**)
+**Prod client ID:** `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls.apps.googleusercontent.com`
+**Status (Aug 14, 2026):** Publishing status **In production**, but Gmail restricted scopes still need Google verification. Keep `GOOGLE_OAUTH_PUBLISHED=false` until a brand-new non-test Gmail can connect cleanly. Test users still work.
+
+**Do not use** the older consumer project `inbox-chief-oauth` (owned by `courtneycdx@gmail.com`). Eddie was added as Owner there, but Workspace access policies still blocked console use. Prod was moved back to Eddie’s project.
+
+### Direct console links (Eddie signed in)
+- Audience / test users / Publish: https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
+- Branding: https://console.cloud.google.com/auth/branding?project=gen-lang-client-0169179372
+- Scopes: https://console.cloud.google.com/auth/scopes?project=gen-lang-client-0169179372
+- Clients: https://console.cloud.google.com/auth/clients?project=gen-lang-client-0169179372
+
+### Add a test user (until Published)
+1. Open https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
+2. Click **Add users**
+3. Paste the patron’s exact Gmail → Save
+4. In Inbox Chief Admin onboard, check **Gmail enabled for this patron**
 
 ### Done (in code / prod)
 - Real, verification-ready **Privacy Policy** (`/privacy`) with the Google API Services **Limited Use disclosure**, scopes, retention/deletion, and contact.
 - Real **Terms of Service** (`/terms`).
 - Support email + homepage centralized in `src/lib/product.ts` (`supportEmail`, `url`).
 - Deployed to prod → https://inbox-chief-kappa.vercel.app/privacy and `/terms`.
+- Scopes on Eddie’s project: `gmail.readonly` + `gmail.send`.
+- Test users present: `eddie@bannermanmenson.com`, `courtneycdx@gmail.com`.
+- After OAuth client switch: existing Gmail refresh tokens stop working. App tells patrons to **Connect Gmail** again (no demo mail; call-in says mailbox needs reconnecting).
 
-### Remaining (browser, Eddie's Google login) — exact clicks
-Google Cloud → project **inbox-chief-oauth** → **APIs & Services → OAuth consent screen** (Audience / Branding / Data Access):
-1. **Branding:** App name `Inbox Chief`; user support email (Eddie); App homepage `https://inbox-chief-kappa.vercel.app`; Privacy `https://inbox-chief-kappa.vercel.app/privacy`; Terms `https://inbox-chief-kappa.vercel.app/terms`; add authorized domain `vercel.app`; app logo optional.
-2. **Data Access → scopes:** confirm `gmail.readonly` + `gmail.send`.
-3. **Audience / Publishing status:** **Publish app** → confirm. `gmail.readonly`/`gmail.send` are **restricted scopes**, so Google requires **verification** (possibly a CASA security assessment). Submit the verification form when prompted.
-4. **Test users:** keep `courtneycdx@gmail.com` + `eddie@bannermanmenson.com` until verification completes — testers can still connect during review.
+### Verification steps (Eddie)
+
+Full copy-paste checklist: **[docs/GOOGLE_OAUTH_PUBLISH.md](./GOOGLE_OAUTH_PUBLISH.md)** —
+console pages, branding values, drafted scope justifications, demo-video script,
+domain verification, and timeline.
+
+Blocker to know up front: verification **cannot** be granted on
+`inbox-chief-kappa.vercel.app`. Google requires Search Console ownership of every
+authorized domain, and `vercel.app` is a public suffix nobody can own. Buy a
+custom domain first (Step 0 of that doc).
 
 ### After it's actually usable by non-test users
-Only when Publishing status = **In production** and a brand-new Gmail connects without a test-user row, set in Vercel (Production + Preview):
+Only when verification is approved and a brand-new Gmail connects without a test-user row,
+set in Vercel (Production + Preview):
 - `GOOGLE_OAUTH_PUBLISHED=true`
-- `NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED=true`
 
-Then redeploy. Onboard hides the test-user queue/checklist and `/api/health` shows `googleOauthPublished: true`.
+Then redeploy. That single flag drives everything: onboard hides the test-user
+queue/checklist, the patron-facing "unverified app" guidance disappears from
+screen and speech, and `/api/health` shows `googleOauthPublished: true`.
+`NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED` is no longer read and can be deleted.
 
-> Submitting verification does **not** immediately unblock non-test users. Keep both flags `false` and keep adding test users until Google approves.
+> Submitting verification does **not** immediately unblock non-test users. Keep the flag
+> `false` and keep adding test users until Google approves.
 
 ## Custom domain (later)
 
@@ -143,7 +185,6 @@ npm run vapi:setup-call-in
 ```
 OPERATOR_EMAILS=you@example.com
 GOOGLE_OAUTH_PUBLISHED=false
-NEXT_PUBLIC_GOOGLE_OAUTH_PUBLISHED=false
 VAPI_API_KEY=…
 VAPI_ASSISTANT_ID=…
 NEXT_PUBLIC_VAPI_CALL_IN_NUMBER=+14057169240

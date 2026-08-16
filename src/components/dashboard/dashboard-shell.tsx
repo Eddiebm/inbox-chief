@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: "/dashboard/downloads", label: "Downloads" },
   { href: "/dashboard/drafts", label: "Drafts" },
   { href: "/dashboard/approvals", label: "Approvals" },
+  { href: "/dashboard/contacts", label: "Contacts" },
   { href: "/dashboard/follow-ups", label: "Follow-ups" },
   { href: "/dashboard/retention", label: "Retention" },
   { href: "/dashboard/settings", label: "Settings" },

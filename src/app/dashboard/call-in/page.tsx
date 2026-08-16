@@ -3,6 +3,7 @@ import { AskAnytimePanel } from "@/components/call-in/ask-anytime-panel";
 import { CallCostsTally } from "@/components/call-in/call-costs-tally";
 import { CallInReadinessBanner } from "@/components/call-in/call-in-readiness-banner";
 import { CallInVoiceSettings } from "@/components/call-in/call-in-voice-settings";
+import { EmailCallAlertSettings } from "@/components/call-in/email-call-alert-settings";
 import { CallMinuteUsageBanner } from "@/components/call-in/call-minute-usage-banner";
 import { OperatorHealthBanner } from "@/components/admin/operator-health-banner";
 import { product } from "@/lib/product";
@@ -27,6 +28,7 @@ export default function CallInPage() {
       <CallInReadinessBanner />
       <CallMinuteUsageBanner />
       <AskAnytimePanel />
+      <EmailCallAlertSettings />
       <CallInVoiceSettings />
       <CallCostsTally />
     </div>

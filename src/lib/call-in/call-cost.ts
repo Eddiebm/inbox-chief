@@ -196,6 +196,16 @@ export async function recordVapiEndOfCallCost(
             mailboxId: identity.mailboxId,
           },
         });
+        await prisma.callInIdentity.updateMany({
+          where: {
+            id: identity.id,
+            OR: [
+              { lastSuccessfulCallAt: null },
+              { lastSuccessfulCallAt: { lt: endedAt } },
+            ],
+          },
+          data: { lastSuccessfulCallAt: endedAt },
+        });
         return {
           recorded: true,
           sessionId: updated.id,
@@ -206,6 +216,16 @@ export async function recordVapiEndOfCallCost(
     }
 
     const created = await prisma.callSession.create({ data });
+    await prisma.callInIdentity.updateMany({
+      where: {
+        id: identity.id,
+        OR: [
+          { lastSuccessfulCallAt: null },
+          { lastSuccessfulCallAt: { lt: endedAt } },
+        ],
+      },
+      data: { lastSuccessfulCallAt: endedAt },
+    });
     return {
       recorded: true,
       sessionId: created.id,

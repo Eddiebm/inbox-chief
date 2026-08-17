@@ -3,7 +3,14 @@ import {
   answerCallInQuestionWithLlm,
   openingPrompt,
 } from "@/lib/call-in/assistant";
+import {
+  isTwilioConfigured,
+  verifyTwilioRequest,
+} from "@/lib/call-in/twilio-signature";
+import { resolveSnapshotForCaller } from "@/lib/call-in/identity";
 import { product } from "@/lib/product";
+
+export const runtime = "nodejs";
 
 function xmlEscape(value: string) {
   return value
@@ -26,16 +33,34 @@ function twiml(body: string) {
  */
 export async function POST(request: Request) {
   const form = await request.formData();
-  const from = String(form.get("From") ?? "");
-  const callSid = String(form.get("CallSid") ?? "");
-  const speech = String(form.get("SpeechResult") ?? "").trim();
+
+  const params: Record<string, string> = {};
+  for (const [key, value] of form.entries()) {
+    if (typeof value === "string") params[key] = value;
+  }
+
+  const validation = verifyTwilioRequest({
+    url: request.url,
+    signature: request.headers.get("x-twilio-signature"),
+    params,
+  });
+  if (!validation.ok) {
+    console.warn("[call-in/twilio] rejected request", validation.error);
+    return NextResponse.json(
+      { error: validation.error },
+      { status: validation.status },
+    );
+  }
+
+  const from = params.From ?? "";
+  const callSid = params.CallSid ?? "";
+  const speech = (params.SpeechResult ?? "").trim();
   const base =
     process.env.CALL_IN_PUBLIC_BASE_URL ??
     process.env.NEXT_PUBLIC_APP_URL ??
     "http://localhost:3000";
   const gatherAction = `${base}/api/call-in/twilio/voice`;
 
-  const { resolveSnapshotForCaller } = await import("@/lib/call-in/identity");
   const resolved = await resolveSnapshotForCaller(from);
   const snapshot = resolved.snapshot;
 
@@ -87,5 +112,8 @@ export async function GET() {
     message: `Configure Twilio voice webhook to POST here for ${product.name} anytime call-in.`,
     mock: process.env.MOCK_INTEGRATIONS === "true",
     inboundNumber: process.env.TWILIO_CALL_IN_NUMBER ?? null,
+    signatureValidation: isTwilioConfigured()
+      ? "enabled"
+      : "unconfigured (POST is refused in production)",
   });
 }

@@ -1,11 +1,22 @@
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
+import {
+  DEV_PLACEHOLDER_SECRET,
+  isPlaceholderSecret,
+  isProductionRuntime,
+} from "@/lib/security/secrets";
 import { MOCK_SESSION_PREFIX, SESSION_COOKIE } from "@/lib/session-cookie";
 
 const COOKIE = SESSION_COOKIE;
 
 function authSecret() {
-  return process.env.AUTH_SECRET ?? "dev-only-change-me";
+  const configured = process.env.AUTH_SECRET;
+  if (isProductionRuntime() && isPlaceholderSecret(configured)) {
+    throw new Error(
+      "AUTH_SECRET is missing or still the development placeholder — session tokens would be forgeable.",
+    );
+  }
+  return configured ?? DEV_PLACEHOLDER_SECRET;
 }
 
 export function hashPassword(password: string): string {

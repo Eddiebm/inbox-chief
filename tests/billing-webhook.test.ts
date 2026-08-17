@@ -46,8 +46,12 @@ describe("prepaid minute-pack webhook", () => {
     ).toBe("ignore");
   });
 
-  it("credits a paid pack once", async () => {
-    let remaining = 10;
+  /** Fake Prisma for the pack path, with a configurable ownership answer. */
+  function makePackPrisma(owner: {
+    linkedCustomerOrgs?: Array<{ organizationId: string; stripeCustomerId: string }>;
+    memberships?: Array<{ organizationId: string; userId: string }>;
+  }) {
+    const state = { remaining: 10 };
     const sessions = new Set<string>();
     const tx = {
       callMinutePackPurchase: {
@@ -67,27 +71,58 @@ describe("prepaid minute-pack webhook", () => {
           const increment = (
             args.update.purchasedMinutesRemaining as { increment: number }
           ).increment;
-          remaining += increment;
-          return { id: "balance_1", purchasedMinutesRemaining: remaining };
+          state.remaining += increment;
+          return { id: "balance_1", purchasedMinutesRemaining: state.remaining };
         },
       },
     };
     const prisma = {
       $transaction: async <T>(fn: (client: typeof tx) => Promise<T>) => fn(tx),
-    } as PrismaForMinutePackWebhook;
-    const purchase = normalizeMinutePackPurchase(
-      "checkout.session.completed",
-      {
-        id: "cs_pack_1",
-        mode: "payment",
-        payment_status: "paid",
-        metadata: {
-          purchaseKind: "minute_pack",
-          minutePackKey: "pack_30",
-          organizationId: "org_1",
-        },
+      subscription: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          (owner.linkedCustomerOrgs ?? []).some(
+            (row) =>
+              row.organizationId === where.organizationId &&
+              row.stripeCustomerId === where.stripeCustomerId,
+          )
+            ? { id: "sub_1" }
+            : null,
       },
-    );
+      organizationMember: {
+        findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+          (owner.memberships ?? []).some(
+            (row) =>
+              row.organizationId === where.organizationId &&
+              row.userId === where.userId,
+          )
+            ? { id: "member_1" }
+            : null,
+      },
+    } as PrismaForMinutePackWebhook;
+    return { prisma, state };
+  }
+
+  const paidPack = (overrides: Record<string, unknown> = {}) =>
+    normalizeMinutePackPurchase("checkout.session.completed", {
+      id: "cs_pack_1",
+      mode: "payment",
+      payment_status: "paid",
+      customer: "cus_1",
+      metadata: {
+        purchaseKind: "minute_pack",
+        minutePackKey: "pack_30",
+        organizationId: "org_1",
+        userId: "user_1",
+      },
+      ...overrides,
+    });
+
+  it("credits a paid pack once for the organization the payer owns", async () => {
+    const { prisma, state } = makePackPrisma({
+      memberships: [{ organizationId: "org_1", userId: "user_1" }],
+    });
+    const purchase = paidPack();
+
     expect(await applyMinutePackPurchase(prisma, purchase)).toMatchObject({
       applied: true,
       minutesCredited: 30,
@@ -97,7 +132,49 @@ describe("prepaid minute-pack webhook", () => {
       applied: false,
       reason: "already_credited",
     });
-    expect(remaining).toBe(40);
+    expect(state.remaining).toBe(40);
+  });
+
+  it("credits when the Stripe customer is already linked to the org", async () => {
+    const { prisma } = makePackPrisma({
+      linkedCustomerOrgs: [
+        { organizationId: "org_1", stripeCustomerId: "cus_1" },
+      ],
+    });
+    expect(await applyMinutePackPurchase(prisma, paidPack())).toMatchObject({
+      applied: true,
+    });
+  });
+
+  it("refuses to credit an organization the payer does not belong to", async () => {
+    const { prisma, state } = makePackPrisma({
+      memberships: [{ organizationId: "org_other", userId: "user_1" }],
+      linkedCustomerOrgs: [
+        { organizationId: "org_other", stripeCustomerId: "cus_1" },
+      ],
+    });
+    expect(await applyMinutePackPurchase(prisma, paidPack())).toEqual({
+      applied: false,
+      reason: "organization_not_owned",
+    });
+    expect(state.remaining).toBe(10);
+  });
+
+  it("refuses metadata that names an org with no proof of ownership at all", async () => {
+    const { prisma, state } = makePackPrisma({});
+    const purchase = paidPack({
+      customer: null,
+      metadata: {
+        purchaseKind: "minute_pack",
+        minutePackKey: "pack_30",
+        organizationId: "org_victim",
+      },
+    });
+    expect(await applyMinutePackPurchase(prisma, purchase)).toEqual({
+      applied: false,
+      reason: "organization_not_owned",
+    });
+    expect(state.remaining).toBe(10);
   });
 });
 

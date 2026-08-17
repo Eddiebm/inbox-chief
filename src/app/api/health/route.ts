@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { isTwilioConfigured } from "@/lib/call-in/twilio-signature";
+import { isVapiWebhookAuthConfigured } from "@/lib/call-in/vapi-webhook";
 import { callInReadinessFromEnv } from "@/lib/call-in/vapi-errors";
 import { isGmailOAuthConfigured } from "@/lib/gmail/config";
 import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
+import { findInsecureProductionSecrets } from "@/lib/security/env-guard";
+import { isProductionRuntime } from "@/lib/security/secrets";
 
 export const runtime = "nodejs";
 
@@ -42,12 +46,17 @@ export async function GET() {
       process.env.STRIPE_PRICE_MINUTES_120?.trim(),
   );
 
+  const insecureSecrets = findInsecureProductionSecrets();
+
   const checks = {
     database,
     gmailOauthConfigured: gmailOauth,
     googleOauthPublished: isGoogleOauthPublished(),
     vapiNumberConfigured: vapi.numberConfigured,
     vapiAssistantLinked: vapi.assistantLinked,
+    vapiWebhookAuthConfigured: isVapiWebhookAuthConfigured(),
+    twilioSignatureValidationConfigured: isTwilioConfigured(),
+    sessionSecretsConfigured: insecureSecrets.length === 0,
     stripe: {
       secretKey: stripeSecret,
       webhookSecret: stripeWebhook,
@@ -64,6 +73,18 @@ export async function GET() {
   if (!checks.vapiAssistantLinked) {
     alerts.push("VAPI assistant is not linked (VAPI_ASSISTANT_ID missing).");
   }
+  if (!checks.vapiWebhookAuthConfigured) {
+    alerts.push(
+      "VAPI webhook authentication is not configured — set VAPI_WEBHOOK_SECRET here and in the VAPI dashboard. The webhook refuses all calls in production until it is set.",
+    );
+  }
+  if (!checks.sessionSecretsConfigured) {
+    alerts.push(
+      `Session/token secrets are unsafe: ${insecureSecrets
+        .map((s) => `${s.name} (${s.reason})`)
+        .join(", ")}.`,
+    );
+  }
   if (checks.database !== "ok") {
     alerts.push(
       checks.database === "error"
@@ -75,7 +96,9 @@ export async function GET() {
   const ok =
     checks.database === "ok" &&
     checks.gmailOauthConfigured &&
-    checks.vapiAssistantLinked;
+    checks.vapiAssistantLinked &&
+    checks.vapiWebhookAuthConfigured &&
+    (checks.sessionSecretsConfigured || !isProductionRuntime());
 
   return NextResponse.json(
     {

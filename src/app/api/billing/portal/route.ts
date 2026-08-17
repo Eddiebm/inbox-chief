@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { resolveUserMailboxScope } from "@/lib/mail/tenant-context";
+import { resolveBillingOrganization } from "@/lib/billing/org-access";
 import { isOperatorEmail } from "@/lib/operator";
+import { sameOriginRedirect } from "@/lib/security/redirects";
 
 export const runtime = "nodejs";
 
@@ -50,14 +51,27 @@ export async function POST(request: Request) {
   }
 
   const origin = new URL(request.url).origin;
-  const returnUrl = parsed.data.returnUrl ?? `${origin}/dashboard/billing`;
+  if (parsed.data.returnUrl && !sameOriginRedirect(parsed.data.returnUrl, origin)) {
+    return NextResponse.json(
+      { error: "returnUrl must point back to Inbox Chief." },
+      { status: 400 },
+    );
+  }
+  const returnUrl =
+    sameOriginRedirect(parsed.data.returnUrl, origin) ??
+    `${origin}/dashboard/billing`;
 
-  const scope =
-    user && user.id !== "mock_user"
-      ? await resolveUserMailboxScope(user.id)
-      : null;
-  const organizationId =
-    scope?.organizationId ?? parsed.data.organizationId ?? null;
+  const orgResult = await resolveBillingOrganization({
+    userId: user?.id,
+    requestedOrganizationId: parsed.data.organizationId,
+  });
+  if (!orgResult.ok) {
+    return NextResponse.json(
+      { error: orgResult.error },
+      { status: orgResult.status },
+    );
+  }
+  const organizationId = orgResult.organizationId;
 
   const customerId = await loadStripeCustomerId(organizationId);
   if (!customerId) {

@@ -19,6 +19,7 @@ import { isGmailAuthFailure } from "@/lib/gmail/auth-errors";
 import { product } from "@/lib/product";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { upsertDerivedContacts } from "@/lib/contacts";
+import { redactIdentifier, redactPhone } from "@/lib/security/secrets";
 
 export type ResolvedCallInIdentity = {
   snapshot: CallInMailboxSnapshot;
@@ -255,10 +256,12 @@ export async function resolveSnapshotForCaller(
     });
 
     if (!identity) {
+      // Phone numbers are PII and these lines are retained by the platform —
+      // log a stable pseudonym plus last four instead of the full number.
       console.info("[call-in] identity unmatched", {
-        callerPhone,
-        phoneE164,
-        candidates,
+        caller: redactPhone(phoneE164),
+        callerId: redactIdentifier(phoneE164),
+        candidateCount: candidates.length,
       });
       return {
         snapshot: unrecognizedCallerSnapshot(),
@@ -271,7 +274,7 @@ export async function resolveSnapshotForCaller(
     }
 
     console.info("[call-in] identity matched", {
-      phoneE164: identity.phoneE164,
+      caller: redactPhone(identity.phoneE164),
       callInIdentityId: identity.id,
       organizationId: identity.organizationId,
     });

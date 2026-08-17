@@ -119,6 +119,10 @@ export type CreditMinutePackResult =
 /**
  * Credit prepaid minutes after a successful Stripe one-time checkout.
  * Idempotent on stripeCheckoutSessionId.
+ *
+ * This primitive performs no ownership check. Webhook traffic must go through
+ * `applyMinutePackPurchase`, which verifies the payer owns the organization
+ * before crediting.
  */
 export async function creditMinutePackPurchase(input: {
   organizationId: string;

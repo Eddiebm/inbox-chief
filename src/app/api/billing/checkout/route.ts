@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/auth";
-import { resolveUserMailboxScope } from "@/lib/mail/tenant-context";
+import { resolveBillingOrganization } from "@/lib/billing/org-access";
 import {
   getMinutePack,
   getPlan,
@@ -10,6 +10,9 @@ import {
   stripePriceEnvKey,
 } from "@/lib/plans";
 import { isOperatorEmail } from "@/lib/operator";
+import { sameOriginRedirect } from "@/lib/security/redirects";
+
+export const runtime = "nodejs";
 
 const checkoutSchema = z.object({
   organizationId: z.string().min(1).optional(),
@@ -75,13 +78,21 @@ export async function POST(request: Request) {
 
   const user = await getCurrentUser();
   const isOperator = user?.email ? isOperatorEmail(user.email) : false;
-  const scope =
-    user && user.id !== "mock_user"
-      ? await resolveUserMailboxScope(user.id)
-      : null;
-  const organizationId =
-    scope?.organizationId ?? parsed.data.organizationId ?? null;
-  if (minutePack && (!user || !scope?.organizationId)) {
+
+  // The org is bound from the session; a client-supplied id is only accepted
+  // when the caller is actually a member of it.
+  const orgResult = await resolveBillingOrganization({
+    userId: user?.id,
+    requestedOrganizationId: parsed.data.organizationId,
+  });
+  if (!orgResult.ok) {
+    return NextResponse.json(
+      { error: orgResult.error },
+      { status: orgResult.status },
+    );
+  }
+  const organizationId = orgResult.organizationId;
+  if (minutePack && (!user || !organizationId)) {
     return NextResponse.json(
       { error: "Sign in to buy minutes for your organization." },
       { status: 401 },
@@ -106,11 +117,23 @@ export async function POST(request: Request) {
     ? stripeMinutePackPriceId(minutePack.id)
     : priceIdForPlan(planKey!);
   const origin = new URL(request.url).origin;
+  for (const [field, value] of [
+    ["successUrl", parsed.data.successUrl],
+    ["cancelUrl", parsed.data.cancelUrl],
+  ] as const) {
+    if (value && !sameOriginRedirect(value, origin)) {
+      return NextResponse.json(
+        { error: `${field} must point back to Inbox Chief.` },
+        { status: 400 },
+      );
+    }
+  }
   const successUrl =
-    parsed.data.successUrl ??
+    sameOriginRedirect(parsed.data.successUrl, origin) ??
     `${origin}/dashboard/billing?checkout=success`;
   const cancelUrl =
-    parsed.data.cancelUrl ?? `${origin}/dashboard/billing?checkout=cancel`;
+    sameOriginRedirect(parsed.data.cancelUrl, origin) ??
+    `${origin}/dashboard/billing?checkout=cancel`;
 
   if (!priceId) {
     // Keys present but price IDs missing — stub session for operator wiring.

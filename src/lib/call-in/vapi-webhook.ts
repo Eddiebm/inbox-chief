@@ -13,6 +13,7 @@ import {
   type CallInSpeechRate,
 } from "@/lib/call-in/speech-rate";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
+import { USAGE_UNAVAILABLE_SPOKEN } from "@/lib/billing/call-usage";
 import {
   googleConsentGuidanceSpoken,
   isGoogleOauthPublished,
@@ -22,6 +23,11 @@ import {
   consumeConnectedTip,
   getProvisioningStatusForPhone,
 } from "@/lib/provisioning";
+import {
+  isPlaceholderSecret,
+  isProductionRuntime,
+  secretsMatch,
+} from "@/lib/security/secrets";
 
 export type VapiToolCall = {
   id: string;
@@ -150,8 +156,11 @@ async function openingWithUsageWarning(
     if (usage.hardCapReached) return usage.spokenCapReached;
     if (usage.warningLevel === "none" || !usage.spokenWarning) return base;
     return `${base} ${usage.spokenWarning}`;
-  } catch {
-    return base;
+  } catch (err) {
+    // Matches the fail-closed tool behaviour: say so up front instead of
+    // inviting the caller to spend minutes we cannot account for.
+    console.error("[call-in] minute usage load failed during opening", err);
+    return USAGE_UNAVAILABLE_SPOKEN;
   }
 }
 
@@ -199,8 +208,15 @@ export async function handleVapiCallInWebhook(
         } else if (usage.warningLevel !== "none" && usage.spokenWarning) {
           usageWarning = usage.spokenWarning;
         }
-      } catch {
-        /* keep reading — never hang up for a usage lookup failure */
+      } catch (err) {
+        // Fail closed. If the balance cannot be read we do not know whether
+        // this call is paid for, and serving it anyway turns a database blip
+        // into unmetered VAPI spend. Setup/status tools stay available.
+        console.error(
+          "[call-in] minute usage load failed; denying billable tools",
+          err,
+        );
+        hardCap = { reached: true, spoken: USAGE_UNAVAILABLE_SPOKEN };
       }
     }
 
@@ -352,15 +368,42 @@ export async function handleVapiCallInWebhook(
   return { ok: true, eventType: type, callId };
 }
 
+/** True when VAPI_WEBHOOK_SECRET is set to a usable value. Surfaced on /api/health. */
+export function isVapiWebhookAuthConfigured(): boolean {
+  return !isPlaceholderSecret(process.env.VAPI_WEBHOOK_SECRET);
+}
+
+/**
+ * Authenticate a VAPI server-url request.
+ *
+ * An unset secret must never mean "allow everyone" in production: this webhook
+ * reads a patron's mailbox aloud and spends VAPI minutes, so an open endpoint
+ * is both a data leak and an unbounded bill. Locally (or in mock mode) the
+ * relaxed behaviour stays so `next dev` works without extra setup.
+ */
 export function verifyVapiWebhookSecret(
   headers: Headers,
 ): { ok: true } | { ok: false; status: number; error: string } {
   const expected = process.env.VAPI_WEBHOOK_SECRET?.trim();
-  if (!expected) return { ok: true };
+
+  if (isPlaceholderSecret(expected)) {
+    if (isProductionRuntime()) {
+      console.error(
+        "[vapi-call-in] rejected webhook: VAPI_WEBHOOK_SECRET is not configured",
+      );
+      return {
+        ok: false,
+        status: 401,
+        error: "Webhook authentication is not configured.",
+      };
+    }
+    return { ok: true };
+  }
+
   const provided =
-    headers.get("x-vapi-secret") ??
-    headers.get("x-webhook-secret") ??
+    headers.get("x-vapi-secret")?.trim() ||
+    headers.get("x-webhook-secret")?.trim() ||
     "";
-  if (provided === expected) return { ok: true };
+  if (secretsMatch(provided, expected)) return { ok: true };
   return { ok: false, status: 401, error: "Invalid webhook secret" };
 }

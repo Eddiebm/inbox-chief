@@ -205,6 +205,14 @@ export function buildSpokenCapReached(ctx: CallUsageMessageContext): string {
   return `You have no call minutes left. Your ${ctx.minutesIncluded} included minutes for this ${ctx.planName} period are used up, and you have no purchased minutes remaining. To keep using call-in, buy more minutes or upgrade your plan in the Inbox Chief dashboard, or wait until your included minutes reset on ${ctx.resetDateLabel}. I cannot read more mail or start a new request until then.`;
 }
 
+/**
+ * Spoken refusal when the minute balance itself cannot be read (database
+ * error, unapplied migration). Billable work fails closed rather than serving
+ * unmetered calls that Inbox Chief pays VAPI for.
+ */
+export const USAGE_UNAVAILABLE_SPOKEN =
+  "I can't check your call minute balance right now, so I can't read mail or start a new request on this call. This is a problem on our side, not yours. Please try again in a few minutes, or contact Inbox Chief support. You can still check your connection status or finish setting up.";
+
 export function buildSpokenUsageWarning(
   level: CallUsageWarningLevel,
   ctx: CallUsageMessageContext,

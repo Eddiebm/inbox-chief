@@ -49,6 +49,9 @@ export type NormalizedMinutePackPurchase =
       amountUsdCents: number;
       stripeCheckoutSessionId: string;
       stripePaymentIntentId: string | null;
+      /** Used to prove the payer actually owns `organizationId`. */
+      stripeCustomerId: string | null;
+      purchaserUserId: string | null;
     }
   | { kind: "ignore"; reason: string };
 
@@ -86,6 +89,8 @@ export function normalizeMinutePackPurchase(
     amountUsdCents: pack.priceUsd * 100,
     stripeCheckoutSessionId: obj.id,
     stripePaymentIntentId: idFrom(obj.payment_intent),
+    stripeCustomerId: idFrom(obj.customer),
+    purchaserUserId: obj.metadata.userId?.trim() || null,
   };
 }
 
@@ -280,7 +285,56 @@ export type PrismaForMinutePackWebhook = {
   $transaction: <T>(
     fn: (tx: MinutePackTransaction) => Promise<T>,
   ) => Promise<T>;
+  subscription: {
+    findFirst: (args: {
+      where: Record<string, unknown>;
+      select?: Record<string, unknown>;
+    }) => Promise<{ id: string } | null>;
+  };
+  organizationMember: {
+    findFirst: (args: {
+      where: Record<string, unknown>;
+      select?: Record<string, unknown>;
+    }) => Promise<{ id: string } | null>;
+  };
 };
+
+/**
+ * Prove the payer is entitled to credit this organization.
+ *
+ * Checkout metadata is attacker-controllable in the general case (anyone who
+ * can reach a Stripe test/live checkout can set it), so an `organizationId`
+ * alone must never move minutes. We require either the Stripe customer to
+ * already be linked to that org, or the purchasing user to be a member of it.
+ */
+export async function verifyMinutePackOwnership(
+  prisma: PrismaForMinutePackWebhook,
+  purchase: Extract<NormalizedMinutePackPurchase, { kind: "credit" }>,
+): Promise<boolean> {
+  if (purchase.stripeCustomerId) {
+    const linked = await prisma.subscription.findFirst({
+      where: {
+        organizationId: purchase.organizationId,
+        stripeCustomerId: purchase.stripeCustomerId,
+      },
+      select: { id: true },
+    });
+    if (linked) return true;
+  }
+
+  if (purchase.purchaserUserId) {
+    const member = await prisma.organizationMember.findFirst({
+      where: {
+        organizationId: purchase.organizationId,
+        userId: purchase.purchaserUserId,
+      },
+      select: { id: true },
+    });
+    if (member) return true;
+  }
+
+  return false;
+}
 
 export type ApplyMinutePackResult =
   | {
@@ -298,6 +352,14 @@ export async function applyMinutePackPurchase(
 ): Promise<ApplyMinutePackResult> {
   if (purchase.kind === "ignore") {
     return { applied: false, reason: purchase.reason };
+  }
+
+  if (!(await verifyMinutePackOwnership(prisma, purchase))) {
+    console.error("[billing/webhook] minute pack rejected: payer does not own org", {
+      organizationId: purchase.organizationId,
+      stripeCheckoutSessionId: purchase.stripeCheckoutSessionId,
+    });
+    return { applied: false, reason: "organization_not_owned" };
   }
 
   return prisma.$transaction(async (tx) => {

@@ -180,21 +180,44 @@ npm run vapi:setup-call-in
 - `OCR_SPACE_API_KEY` or `GOOGLE_VISION_API_KEY` enables image / scanned-PDF text for call-in.
 - Without a key, attachments announce filename with a clear “can’t read picture text yet” line.
 
+## Required security env (production refuses to serve without these)
+
+| Variable | What breaks without it |
+| --- | --- |
+| `VAPI_WEBHOOK_SECRET` | `POST /api/call-in/vapi/webhook` returns **401 for every request**. Call-in is dead until it is set here *and* as a `X-Vapi-Secret` header on the VAPI assistant's server URL. |
+| `AUTH_SECRET` | The server **refuses to boot**. Session cookies and stored mailbox tokens would otherwise use the published `dev-only-change-me` placeholder. |
+| `TOKEN_ENCRYPTION_KEY` | Optional — falls back to `AUTH_SECRET`. If you set it *after* mailboxes are connected, existing encrypted Gmail tokens can no longer be decrypted and every patron must reconnect. |
+| `TWILIO_AUTH_TOKEN` | `POST /api/call-in/twilio/voice` returns 403. This is the legacy TwiML fallback behind VAPI; leaving it unset simply keeps that path closed. |
+
+Generate real values with `openssl rand -hex 32`. Confirm with `/api/health` →
+`checks.vapiWebhookAuthConfigured`, `checks.sessionSecretsConfigured`.
+
+**Order of operations when deploying:** set `VAPI_WEBHOOK_SECRET` in Vercel and
+paste the same value into the VAPI assistant's server-URL headers *before or at*
+the deploy. The webhook now fails closed, so a deploy without it takes call-in
+offline rather than leaving it open.
+
 ## Env reminders
 
 ```
 OPERATOR_EMAILS=you@example.com
 GOOGLE_OAUTH_PUBLISHED=false
+AUTH_SECRET=…                    # required in production
+TOKEN_ENCRYPTION_KEY=            # optional; defaults to AUTH_SECRET
 VAPI_API_KEY=…
 VAPI_ASSISTANT_ID=…
+VAPI_WEBHOOK_SECRET=…            # required in production
 NEXT_PUBLIC_VAPI_CALL_IN_NUMBER=+14057169240
 TWILIO_ACCOUNT_SID=
-TWILIO_AUTH_TOKEN=
+TWILIO_AUTH_TOKEN=               # required to enable the TwiML fallback
 TWILIO_SMS_FROM_NUMBER=
 OCR_SPACE_API_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_PRICE_PATRON=
 STRIPE_PRICE_PRO=
+STRIPE_PRICE_MINUTES_30=
+STRIPE_PRICE_MINUTES_60=
+STRIPE_PRICE_MINUTES_120=
 STRIPE_WEBHOOK_SECRET=
 ```
 

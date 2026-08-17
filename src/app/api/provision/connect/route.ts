@@ -5,8 +5,28 @@ import {
   findProvisioningByCode,
   verifyProvisioningMagicToken,
 } from "@/lib/provisioning";
+import {
+  clientKeyFromRequest,
+  FailureRateLimiter,
+} from "@/lib/security/rate-limit";
 
 export const runtime = "nodejs";
+
+/**
+ * Short codes redeem straight into a session, so guessing is throttled hard.
+ * The signed magic link (`?token=`) is the preferred path and is not limited —
+ * it is unguessable and already carries its own expiry.
+ */
+const shortCodeLimiter = new FailureRateLimiter({
+  maxFailures: 5,
+  windowMs: 10 * 60 * 1000,
+  lockoutMs: 15 * 60 * 1000,
+});
+
+/** Exposed so tests can start from a clean slate. */
+export function resetProvisionRateLimiter() {
+  shortCodeLimiter.reset();
+}
 
 function appOrigin(request: Request): string {
   return (
@@ -35,6 +55,19 @@ export async function GET(request: Request) {
   const token = searchParams.get("token");
   const code = searchParams.get("code");
 
+  const clientKey = clientKeyFromRequest(request);
+  if (code && !token) {
+    const gate = shortCodeLimiter.check(clientKey);
+    if (!gate.allowed) {
+      return NextResponse.redirect(
+        new URL("/login?provision=too_many_attempts", appOrigin(request)),
+        {
+          headers: { "Retry-After": String(gate.retryAfterSeconds) },
+        },
+      );
+    }
+  }
+
   try {
     const { getNodePrisma } = await import("@/lib/db-node");
     const prisma = getNodePrisma();
@@ -50,10 +83,12 @@ export async function GET(request: Request) {
     }
 
     if (!provision) {
+      if (code && !token) shortCodeLimiter.recordFailure(clientKey);
       return NextResponse.redirect(
         new URL("/login?provision=invalid", appOrigin(request)),
       );
     }
+    if (code && !token) shortCodeLimiter.recordSuccess(clientKey);
     if (
       !isGoogleOauthPublished() &&
       provision.needsGoogleTestUser &&
@@ -75,6 +110,7 @@ export async function GET(request: Request) {
       ),
     );
   } catch (error) {
+    if (code && !token) shortCodeLimiter.recordFailure(clientKey);
     console.warn("[provision/connect] rejected", error);
     return NextResponse.redirect(
       new URL("/login?provision=expired", appOrigin(request)),

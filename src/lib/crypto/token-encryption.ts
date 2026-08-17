@@ -1,13 +1,24 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import {
+  DEV_PLACEHOLDER_SECRET,
+  isPlaceholderSecret,
+  isProductionRuntime,
+} from "@/lib/security/secrets";
 
 const PREFIX = "v1";
 
 function encryptionKey(): Buffer {
-  const secret =
+  const configured =
     process.env.TOKEN_ENCRYPTION_KEY?.trim() ||
-    process.env.AUTH_SECRET?.trim() ||
-    "dev-only-change-me";
-  return createHash("sha256").update(secret).digest();
+    process.env.AUTH_SECRET?.trim();
+  if (isProductionRuntime() && isPlaceholderSecret(configured)) {
+    throw new Error(
+      "TOKEN_ENCRYPTION_KEY / AUTH_SECRET is missing or still the development placeholder — mailbox tokens would be readable by anyone with the source.",
+    );
+  }
+  return createHash("sha256")
+    .update(configured || DEV_PLACEHOLDER_SECRET)
+    .digest();
 }
 
 /** Encrypt a secret string for at-rest storage (AES-256-GCM). */

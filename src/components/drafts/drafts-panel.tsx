@@ -1,27 +1,19 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { demoDrafts, updateDraft, type DraftItem } from "@/lib/drafts";
+import { useEffect, useState } from "react";
+import type { DraftItem } from "@/lib/drafts";
 import { speak } from "@/lib/voice/speech";
 import { product } from "@/lib/product";
 
-const DEMO_SCOPE = {
-  organizationId: "demo_org",
-  workspaceId: "demo_ws",
-  mailboxId: "demo_mb",
-  userId: "demo_user",
-};
-
 export function DraftsPanel() {
-  const initial = useMemo(() => demoDrafts(DEMO_SCOPE), []);
-  const [items, setItems] = useState<DraftItem[]>(initial);
+  const [items, setItems] = useState<DraftItem[]>([]);
+  const [mailboxConnected, setMailboxConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(
-    `${product.name} drafts for your review. Edit, discard, or send to approvals — never silent send.`,
+    `${product.name} is loading drafts from your mailbox.`,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initial[0]?.id ?? null,
-  );
-  const [editBody, setEditBody] = useState(initial[0]?.bodyText ?? "");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
   const active = items.filter((i) => i.status !== "DISCARDED");
@@ -31,10 +23,49 @@ export function DraftsPanel() {
     await speak(message);
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/drafts");
+        const data = (await response.json()) as {
+          items?: DraftItem[];
+          mailboxConnected?: boolean;
+        };
+        if (cancelled) return;
+        const loaded = data.items ?? [];
+        setMailboxConnected(Boolean(data.mailboxConnected));
+        setItems(loaded);
+        setSelectedId(loaded[0]?.id ?? null);
+        setEditBody(loaded[0]?.bodyText ?? "");
+        if (!data.mailboxConnected) {
+          setStatus(
+            "Connect Gmail in Settings to review live drafts. This page never shows sample mail.",
+          );
+        } else if (loaded.length === 0) {
+          setStatus(
+            "No drafts waiting. Open Inbox and choose Draft a reply, or compose on a call. Nothing sends until you approve.",
+          );
+        } else {
+          setStatus(
+            `${loaded.length} draft${loaded.length === 1 ? "" : "s"} loaded. Review, then send to approvals.`,
+          );
+        }
+      } catch {
+        if (!cancelled) setStatus("Could not load drafts right now.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   function select(item: DraftItem) {
     setSelectedId(item.id);
     setEditBody(item.bodyText);
-    setStatus(
+    void announce(
       `Draft: ${item.subject}. To ${item.toAddresses.join(", ")}. Status ${item.status.replaceAll("_", " ").toLowerCase()}.`,
     );
   }
@@ -42,17 +73,30 @@ export function DraftsPanel() {
   async function act(action: "edit" | "request_approval" | "discard") {
     if (!selected) return;
     try {
-      const result = updateDraft(
-        selected,
-        action,
-        DEMO_SCOPE,
-        action === "edit" ? editBody : undefined,
-      );
-      setItems((prev) =>
-        prev.map((i) => (i.id === result.item.id ? result.item : i)),
-      );
-      if (action === "edit") setEditBody(result.item.bodyText);
-      await announce(result.spoken);
+      const response = await fetch("/api/drafts", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: selected.id,
+          action,
+          bodyText: action === "edit" ? editBody : undefined,
+        }),
+      });
+      const data = (await response.json()) as {
+        item?: DraftItem;
+        spoken?: string;
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.message ?? "That draft could not be saved.");
+      }
+      if (data.item) {
+        setItems((prev) =>
+          prev.map((i) => (i.id === data.item!.id ? data.item! : i)),
+        );
+        if (action === "edit") setEditBody(data.item.bodyText);
+      }
+      await announce(data.spoken ?? "Saved.");
     } catch (err) {
       await announce(err instanceof Error ? err.message : "Action blocked.");
     }
@@ -63,8 +107,8 @@ export function DraftsPanel() {
       <header className="page-header">
         <h1>Drafts</h1>
         <p>
-          Review AI-prepared replies. Request approval when ready — sending still
-          requires a separate confirmation on Approvals.
+          Replies prepared from your live mail. Request approval when ready —
+          sending still requires a separate confirmation on Approvals.
         </p>
       </header>
 
@@ -72,10 +116,13 @@ export function DraftsPanel() {
         {status}
       </p>
       <p role="status">
-        {active.length} active draft{active.length === 1 ? "" : "s"}
-        {active.length === 0
-          ? " — nothing waiting for review yet."
-          : "."}
+        {loading
+          ? "Loading."
+          : !mailboxConnected
+            ? "No mailbox connected."
+            : `${active.length} active draft${active.length === 1 ? "" : "s"}${
+                active.length === 0 ? " — nothing waiting for review yet." : "."
+              }`}
       </p>
 
       <ul className="drafts-list" aria-label="Draft messages">
@@ -139,6 +186,12 @@ export function DraftsPanel() {
             </a>
           </div>
         </section>
+      ) : !loading && !mailboxConnected ? (
+        <p>
+          <a className="btn-primary" href="/dashboard/settings">
+            Connect Gmail
+          </a>
+        </p>
       ) : null}
     </div>
   );

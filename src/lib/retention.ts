@@ -1,4 +1,16 @@
+import { isPrimaryInboxMessage } from "@/lib/call-in/primary-inbox";
 import { tenantWhere, type TenantScope } from "@/lib/tenant";
+
+export const DEFAULT_RETAIN_DAYS = 90;
+
+const PROTECTED_CATEGORY_NAMES = new Set([
+  "PRIMARY",
+  "PERSONAL",
+  "LEGAL",
+  "MEDICAL",
+  "FINANCIAL",
+  "FAMILY",
+]);
 
 export type RetentionCandidate = {
   id: string;
@@ -89,6 +101,53 @@ export function decideRetention(
 
   return {
     item: { ...item, status: "TRASH_APPROVED" },
-    spoken: `Approved for Trash: ${item.subject}. Move to Trash only after you confirm in Gmail sync.`,
+    spoken: `Approved for Trash: ${item.subject}. Inbox Chief does not delete Gmail.`,
+  };
+}
+
+export function isRetentionProtected(row: {
+  fromAddress: string;
+  subject?: string | null;
+  snippet?: string | null;
+  bodyText?: string | null;
+  categoryName?: string | null;
+  metadata?: unknown;
+}): boolean {
+  if (isPrimaryInboxMessage(row)) return true;
+  const name = (row.categoryName ?? "").trim().toUpperCase();
+  return PROTECTED_CATEGORY_NAMES.has(name);
+}
+
+export function toRetentionCandidate(
+  row: {
+    id: string;
+    organizationId: string;
+    workspaceId: string;
+    mailboxId: string;
+    subject: string;
+    categoryName: string | null;
+    receivedAt: Date;
+    retentionDecision: RetentionCandidate["status"] | null;
+    fromAddress: string;
+    snippet?: string | null;
+    bodyText?: string | null;
+    metadata?: unknown;
+  },
+  now = new Date(),
+): RetentionCandidate {
+  const ageDays = Math.max(
+    0,
+    Math.floor((now.getTime() - row.receivedAt.getTime()) / 86_400_000),
+  );
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    workspaceId: row.workspaceId,
+    mailboxId: row.mailboxId,
+    subject: row.subject,
+    category: row.categoryName?.trim() || "Other",
+    ageDays,
+    neverDelete: isRetentionProtected(row),
+    status: row.retentionDecision ?? "CANDIDATE",
   };
 }

@@ -1,47 +1,87 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  demoFollowUps,
-  updateFollowUp,
-  type FollowUpItem,
-} from "@/lib/follow-ups";
+import { useEffect, useState } from "react";
+import type { FollowUpItem } from "@/lib/follow-ups";
 import { speak } from "@/lib/voice/speech";
 import { product } from "@/lib/product";
 
-const DEMO_SCOPE = {
-  organizationId: "demo_org",
-  workspaceId: "demo_ws",
-  mailboxId: "demo_mb",
-  userId: "demo_user",
-};
-
 export function FollowUpsPanel() {
-  const initial = useMemo(() => demoFollowUps(DEMO_SCOPE), []);
-  const [items, setItems] = useState<FollowUpItem[]>(initial);
+  const [items, setItems] = useState<FollowUpItem[]>([]);
+  const [mailboxConnected, setMailboxConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(
-    `${product.name} tracks follow-ups so nothing slips. Ask about them anytime on Call in.`,
+    `${product.name} is loading follow-ups from your mailbox.`,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initial[0]?.id ?? null,
-  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
-  const open = items.filter((i) => i.status === "OPEN");
+  const open = items.filter((i) => i.status === "OPEN" || i.status === "SNOOZED");
 
   async function announce(message: string) {
     setStatus(message);
     await speak(message);
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/follow-ups");
+        const data = (await response.json()) as {
+          items?: FollowUpItem[];
+          mailboxConnected?: boolean;
+        };
+        if (cancelled) return;
+        const loaded = data.items ?? [];
+        setMailboxConnected(Boolean(data.mailboxConnected));
+        setItems(loaded);
+        setSelectedId(loaded[0]?.id ?? null);
+        if (!data.mailboxConnected) {
+          setStatus(
+            "Connect Gmail in Settings to track live follow-ups. This page never shows sample mail.",
+          );
+        } else if (loaded.length === 0) {
+          setStatus(
+            "No follow-ups yet. In Inbox, choose Defer on a message to set a 3-day reminder.",
+          );
+        } else {
+          setStatus(
+            `${loaded.length} follow-up${loaded.length === 1 ? "" : "s"} loaded.`,
+          );
+        }
+      } catch {
+        if (!cancelled) setStatus("Could not load follow-ups right now.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function act(action: "complete" | "snooze") {
     if (!selected) return;
     try {
-      const result = updateFollowUp(selected, action, DEMO_SCOPE);
-      setItems((prev) =>
-        prev.map((i) => (i.id === result.item.id ? result.item : i)),
-      );
-      await announce(result.spoken);
+      const response = await fetch("/api/follow-ups", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selected.id, action }),
+      });
+      const data = (await response.json()) as {
+        item?: FollowUpItem;
+        spoken?: string;
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.message ?? "That follow-up could not be saved.");
+      }
+      if (data.item) {
+        setItems((prev) =>
+          prev.map((i) => (i.id === data.item!.id ? data.item! : i)),
+        );
+      }
+      await announce(data.spoken ?? "Saved.");
     } catch (err) {
       await announce(err instanceof Error ? err.message : "Action blocked.");
     }
@@ -52,8 +92,8 @@ export function FollowUpsPanel() {
       <header className="page-header">
         <h1>Follow-ups</h1>
         <p>
-          Threads waiting on someone else — or on you. Complete or snooze with
-          clear spoken confirmation.
+          Reminders created when you defer live mail. Complete or snooze with
+          clear spoken confirmation. Nothing sends from this page.
         </p>
       </header>
 
@@ -61,8 +101,13 @@ export function FollowUpsPanel() {
         {status}
       </p>
       <p role="status">
-        {open.length} open follow-up{open.length === 1 ? "" : "s"}
-        {open.length === 0 ? " — none due right now." : "."}
+        {loading
+          ? "Loading."
+          : !mailboxConnected
+            ? "No mailbox connected."
+            : `${open.length} open follow-up${open.length === 1 ? "" : "s"}${
+                open.length === 0 ? " — none due right now." : "."
+              }`}
       </p>
 
       <ul className="followups-list" aria-label="Follow-up items">
@@ -77,7 +122,7 @@ export function FollowUpsPanel() {
               }
               onClick={() => {
                 setSelectedId(item.id);
-                setStatus(
+                void announce(
                   `${item.subject}. With ${item.counterparty}. Due ${item.dueLabel}. ${item.note} Status ${item.status.toLowerCase()}.`,
                 );
               }}
@@ -97,7 +142,7 @@ export function FollowUpsPanel() {
           <button
             type="button"
             className="btn-primary"
-            disabled={selected.status !== "OPEN"}
+            disabled={selected.status === "COMPLETED"}
             onClick={() => void act("complete")}
           >
             Mark complete
@@ -105,12 +150,18 @@ export function FollowUpsPanel() {
           <button
             type="button"
             className="btn-secondary"
-            disabled={selected.status !== "OPEN"}
+            disabled={selected.status === "COMPLETED"}
             onClick={() => void act("snooze")}
           >
             Snooze 3 days
           </button>
         </div>
+      ) : !loading && !mailboxConnected ? (
+        <p>
+          <a className="btn-primary" href="/dashboard/settings">
+            Connect Gmail
+          </a>
+        </p>
       ) : null}
     </div>
   );

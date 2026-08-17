@@ -676,6 +676,7 @@ export async function syncMailbox(
             isRead,
             needsAttention,
             metadata: messageMetadata,
+            // Do not reset triageStatus or retentionDecision — those are patron decisions.
           },
         });
         const contact = parseMailboxAddress(fromAddress);

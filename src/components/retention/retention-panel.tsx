@@ -1,30 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  decideRetention,
-  demoRetentionCandidates,
-  type RetentionCandidate,
-} from "@/lib/retention";
+import { useEffect, useState } from "react";
+import type { RetentionCandidate } from "@/lib/retention";
 import { speak } from "@/lib/voice/speech";
 import { product } from "@/lib/product";
 
-const DEMO_SCOPE = {
-  organizationId: "demo_org",
-  workspaceId: "demo_ws",
-  mailboxId: "demo_mb",
-  userId: "demo_user",
-};
-
 export function RetentionPanel() {
-  const initial = useMemo(() => demoRetentionCandidates(DEMO_SCOPE), []);
-  const [items, setItems] = useState<RetentionCandidate[]>(initial);
+  const [items, setItems] = useState<RetentionCandidate[]>([]);
+  const [mailboxConnected, setMailboxConnected] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(
-    `${product.name} never deletes protected categories. Every trash move needs your review.`,
+    `${product.name} is loading retention candidates from your mailbox.`,
   );
-  const [selectedId, setSelectedId] = useState<string | null>(
-    initial[0]?.id ?? null,
-  );
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selected = items.find((i) => i.id === selectedId) ?? null;
   const open = items.filter((i) => i.status === "CANDIDATE");
@@ -34,14 +22,67 @@ export function RetentionPanel() {
     await speak(message);
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/retention");
+        const data = (await response.json()) as {
+          items?: RetentionCandidate[];
+          mailboxConnected?: boolean;
+          retainDays?: number;
+        };
+        if (cancelled) return;
+        const loaded = data.items ?? [];
+        setMailboxConnected(Boolean(data.mailboxConnected));
+        setItems(loaded);
+        setSelectedId(loaded[0]?.id ?? null);
+        if (!data.mailboxConnected) {
+          setStatus(
+            "Connect Gmail in Settings to review old mail. This page never shows sample mail.",
+          );
+        } else if (loaded.length === 0) {
+          setStatus(
+            `Nothing past your ${data.retainDays ?? 90}-day retention window yet. Primary mail is protected from Trash.`,
+          );
+        } else {
+          setStatus(
+            `${loaded.length} candidate${loaded.length === 1 ? "" : "s"} older than ${data.retainDays ?? 90} days. Keep or approve for Trash review — Gmail is not deleted here.`,
+          );
+        }
+      } catch {
+        if (!cancelled) setStatus("Could not load retention right now.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function act(decision: "keep" | "approve_trash") {
     if (!selected) return;
     try {
-      const result = decideRetention(selected, decision, DEMO_SCOPE);
-      setItems((prev) =>
-        prev.map((i) => (i.id === result.item.id ? result.item : i)),
-      );
-      await announce(result.spoken);
+      const response = await fetch("/api/retention", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: selected.id, action: decision }),
+      });
+      const data = (await response.json()) as {
+        item?: RetentionCandidate;
+        spoken?: string;
+        message?: string;
+      };
+      if (!response.ok) {
+        throw new Error(data.message ?? "That decision could not be saved.");
+      }
+      if (data.item) {
+        setItems((prev) =>
+          prev.map((i) => (i.id === data.item!.id ? data.item! : i)),
+        );
+      }
+      await announce(data.spoken ?? "Saved.");
     } catch (err) {
       await announce(err instanceof Error ? err.message : "Action blocked.");
     }
@@ -52,8 +93,8 @@ export function RetentionPanel() {
       <header className="page-header">
         <h1>Retention center</h1>
         <p>
-          Review messages past your retention window. Protected categories cannot
-          be trashed. Nothing is deleted without your decision.
+          Old mail from your connected mailbox. Protected categories cannot be
+          trashed. Inbox Chief never deletes Gmail from this page.
         </p>
       </header>
 
@@ -61,8 +102,13 @@ export function RetentionPanel() {
         {status}
       </p>
       <p role="status">
-        {open.length} candidate{open.length === 1 ? "" : "s"} waiting for review
-        {open.length === 0 ? " — nothing past retention yet." : "."}
+        {loading
+          ? "Loading."
+          : !mailboxConnected
+            ? "No mailbox connected."
+            : `${open.length} candidate${open.length === 1 ? "" : "s"} waiting for review${
+                open.length === 0 ? " — nothing past retention yet." : "."
+              }`}
       </p>
 
       <ul className="retention-list" aria-label="Retention candidates">
@@ -77,7 +123,7 @@ export function RetentionPanel() {
               }
               onClick={() => {
                 setSelectedId(item.id);
-                setStatus(
+                void announce(
                   `${item.subject}. Category ${item.category}. Age ${item.ageDays} days. ${item.neverDelete ? "Protected from deletion." : "Eligible for Trash review."} Status ${item.status.replaceAll("_", " ").toLowerCase()}.`,
                 );
               }}
@@ -113,6 +159,12 @@ export function RetentionPanel() {
             Approve for Trash
           </button>
         </div>
+      ) : !loading && !mailboxConnected ? (
+        <p>
+          <a className="btn-primary" href="/dashboard/settings">
+            Connect Gmail
+          </a>
+        </p>
       ) : null}
     </div>
   );

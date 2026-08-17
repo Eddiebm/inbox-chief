@@ -1,3 +1,4 @@
+import { isPrimaryInboxMessage } from "@/lib/call-in/primary-inbox";
 import { tenantWhere, type TenantScope } from "@/lib/tenant";
 
 export type TriageMessage = {
@@ -88,11 +89,44 @@ export function triageMessage(
   if (action === "defer") {
     return {
       item: { ...item, status: "DEFERRED" },
-      spoken: `Deferred: ${item.subject}. It will return in your next briefing.`,
+      spoken: `Deferred: ${item.subject}. A follow-up reminder is due in 3 days.`,
     };
   }
   return {
     item: { ...item, status: "ARCHIVED", needsAttention: false },
-    spoken: `Archived: ${item.subject}.`,
+    spoken: `Archived in Inbox Chief: ${item.subject}. Gmail is unchanged.`,
+  };
+}
+
+export function toTriageMessage(row: {
+  id: string;
+  organizationId: string;
+  workspaceId: string;
+  mailboxId: string;
+  fromAddress: string;
+  subject: string;
+  snippet: string | null;
+  categoryName: string | null;
+  needsAttention: boolean;
+  triageStatus: TriageMessage["status"];
+  receivedAt: Date;
+  bodyText?: string | null;
+  metadata?: unknown;
+}): TriageMessage {
+  const category =
+    row.categoryName?.trim() ||
+    (isPrimaryInboxMessage(row) ? "Primary" : "Other");
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    workspaceId: row.workspaceId,
+    mailboxId: row.mailboxId,
+    fromAddress: row.fromAddress,
+    subject: row.subject,
+    snippet: (row.snippet ?? row.bodyText ?? "").slice(0, 280),
+    category,
+    needsAttention: row.needsAttention && row.triageStatus === "NEW",
+    status: row.triageStatus,
+    receivedAt: row.receivedAt.toISOString(),
   };
 }

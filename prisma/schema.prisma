@@ -106,6 +106,19 @@ enum DraftStatus {
   DISCARDED
 }
 
+enum TriageStatus {
+  NEW
+  TRIAGED
+  DEFERRED
+  ARCHIVED
+}
+
+enum RetentionDecision {
+  CANDIDATE
+  KEPT
+  TRASH_APPROVED
+}
+
 enum AuditAction {
   LOGIN
   LOGOUT
@@ -778,10 +791,12 @@ model Message {
   snippet        String?
   bodyText       String?
   receivedAt     DateTime
-  categoryName   String?
-  needsAttention Boolean  @default(false)
-  isRead         Boolean  @default(false)
-  metadata       Json?
+  categoryName        String?
+  needsAttention      Boolean            @default(false)
+  isRead              Boolean            @default(false)
+  triageStatus        TriageStatus       @default(NEW)
+  retentionDecision   RetentionDecision?
+  metadata            Json?
   createdAt      DateTime @default(now())
 
   workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

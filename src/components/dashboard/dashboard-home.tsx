@@ -12,6 +12,8 @@ type LiveStatus = {
   mailboxConnected: boolean;
   mailboxEmail: string | null;
   statusLine: string;
+  attentionCount: number;
+  draftCount: number;
 };
 
 function readPreferredName(): string {
@@ -98,15 +100,19 @@ export function DashboardHome() {
     mailboxConnected: false,
     mailboxEmail: null,
     statusLine: "Loading your mailbox status…",
+    attentionCount: 0,
+    draftCount: 0,
   });
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [meRes, mailRes] = await Promise.all([
+        const [meRes, mailRes, inboxRes, draftsRes] = await Promise.all([
           fetch("/api/auth/me"),
           fetch("/api/mail/status"),
+          fetch("/api/inbox"),
+          fetch("/api/drafts"),
         ]);
         const me = (await meRes.json()) as { isMock?: boolean };
         const mail = (await mailRes.json()) as {
@@ -115,10 +121,17 @@ export function DashboardHome() {
           mailbox?: { emailAddress?: string | null };
           message?: string;
         };
+        const inbox = (await inboxRes.json()) as {
+          items?: Array<{ needsAttention?: boolean; status?: string }>;
+        };
+        const drafts = (await draftsRes.json()) as { items?: unknown[] };
         if (cancelled) return;
         const connected = Boolean(mail.connected);
         const email =
           mail.email ?? mail.mailbox?.emailAddress ?? null;
+        const attentionCount = (inbox.items ?? []).filter(
+          (item) => item.needsAttention && item.status === "NEW",
+        ).length;
         setLive({
           loading: false,
           isMock: Boolean(me.isMock),
@@ -127,6 +140,8 @@ export function DashboardHome() {
           statusLine: connected
             ? `Primary mailbox connected${email ? `: ${email}` : ""}.`
             : "No mailbox connected yet. Connect Gmail in Settings to sync your Primary inbox.",
+          attentionCount,
+          draftCount: (drafts.items ?? []).length,
         });
       } catch {
         if (!cancelled) {
@@ -137,6 +152,8 @@ export function DashboardHome() {
             mailboxEmail: null,
             statusLine:
               "Could not load mailbox status. Open Settings to connect Gmail.",
+            attentionCount: 0,
+            draftCount: 0,
           });
         }
       }
@@ -200,17 +217,16 @@ export function DashboardHome() {
           title="Messages needing attention"
           statusText={
             live.mailboxConnected
-              ? "Synced in Primary — call in to hear them"
+              ? `${live.attentionCount} in Primary`
               : "Connect Gmail to sync Primary mail"
           }
-          description="Priority Primary items. Call in or Ask by voice to hear from, subject, and message text."
-          href="/dashboard/call-in"
-          actionLabel="Call in or ask"
+          description="Priority Primary items from your connected mailbox. Open Inbox to triage, or call in to hear them."
+          href="/dashboard/inbox"
+          actionLabel="Open inbox"
         >
-          <p className="dash-empty">
-            {live.mailboxConnected
-              ? "Open Call in to hear what needs attention. Nothing sends from that call."
-              : "No Primary mail to review until a mailbox is connected."}
+          <p className="dash-metric">
+            <span className="dash-metric__value">{live.attentionCount}</span>
+            <span className="dash-metric__label"> needing attention</span>
           </p>
         </WorkSurface>
 
@@ -218,13 +234,13 @@ export function DashboardHome() {
           id="surface-drafts"
           title="Drafts awaiting review"
           statusText="Never auto-send"
-          description="Suggested replies appear here after you ask for a draft. You always review before anything sends."
+          description="Suggested replies from Inbox or Call in. You always review before anything sends."
           href="/dashboard/drafts"
           actionLabel="Open drafts"
         >
-          <p className="dash-empty">
-            No drafts waiting. Ask for a draft from Call in or the drafts page
-            when you are ready.
+          <p className="dash-metric">
+            <span className="dash-metric__value">{live.draftCount}</span>
+            <span className="dash-metric__label"> drafts</span>
           </p>
         </WorkSurface>
 

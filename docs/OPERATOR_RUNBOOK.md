@@ -4,7 +4,8 @@
   read back or reviewed, then explicitly confirmed in a separate action. There
   is no automatic-send path.
 - Add `https://www.googleapis.com/auth/calendar.readonly` to the Google OAuth
-  consent-screen scope list for project `gen-lang-client-0169179372` and include
+  consent-screen scope list for the **Inbox Chief** GCP project (`YOUR_PROJECT_ID`
+  — see [GOOGLE_OAUTH_PUBLISH.md](./GOOGLE_OAUTH_PUBLISH.md) Step 0) and include
   it in the pending verification submission. Calendar remains a separate,
   optional **Connect Calendar** action in Settings; do not add it to Gmail
   connect.
@@ -93,20 +94,20 @@ public provision URL are the fallback handoff.
 ## Google OAuth — ownership + Publish (Eddie only)
 
 **Google account that owns prod OAuth:** `eddie@bannermanmenson.com`
-**Prod OAuth project:** `gen-lang-client-0169179372` (Console name: **Default Gemini Project**)
-**Prod client ID:** `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls.apps.googleusercontent.com`
-**Status (Aug 14, 2026):** Publishing status **In production**, but Gmail restricted scopes still need Google verification. Keep `GOOGLE_OAUTH_PUBLISHED=false` until a brand-new non-test Gmail can connect cleanly. Test users still work.
+**Target OAuth project:** dedicated **Inbox Chief** project (`YOUR_PROJECT_ID` — create per [GOOGLE_OAUTH_PUBLISH.md Step 0](./GOOGLE_OAUTH_PUBLISH.md#step-0--create-the-inbox-chief-gcp-project-do-this-first))
+**Legacy (do not use for Inbox Chief):** `gen-lang-client-0169179372` — **YT Studio** / *Default Gemini Project*. Leave untouched.
+**Status (Aug 18, 2026):** Production still on legacy YT Studio client until Eddie creates the new project and updates Vercel. Keep `GOOGLE_OAUTH_PUBLISHED=false` until a brand-new non-test Gmail can connect cleanly on the **new** client.
 
-**Do not use** the older consumer project `inbox-chief-oauth` (owned by `courtneycdx@gmail.com`). Eddie was added as Owner there, but Workspace access policies still blocked console use. Prod was moved back to Eddie’s project.
+### Direct console links (Eddie signed in — replace `YOUR_PROJECT_ID`)
 
-### Direct console links (Eddie signed in)
-- Audience / test users / Publish: https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
-- Branding: https://console.cloud.google.com/auth/branding?project=gen-lang-client-0169179372
-- Scopes: https://console.cloud.google.com/auth/scopes?project=gen-lang-client-0169179372
-- Clients: https://console.cloud.google.com/auth/clients?project=gen-lang-client-0169179372
+Set `GOOGLE_CLOUD_PROJECT_ID` and `NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_ID` in Vercel so Admin onboard deep-links work.
+- Audience / test users / Publish: https://console.cloud.google.com/auth/audience?project=YOUR_PROJECT_ID
+- Branding: https://console.cloud.google.com/auth/branding?project=YOUR_PROJECT_ID
+- Scopes: https://console.cloud.google.com/auth/scopes?project=YOUR_PROJECT_ID
+- Clients: https://console.cloud.google.com/auth/clients?project=YOUR_PROJECT_ID
 
 ### Add a test user (until Published)
-1. Open https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
+1. Open https://console.cloud.google.com/auth/audience?project=YOUR_PROJECT_ID
 2. Click **Add users**
 3. Paste the patron’s exact Gmail → Save
 4. In Inbox Chief Admin onboard, check **Gmail enabled for this patron**
@@ -116,8 +117,7 @@ public provision URL are the fallback handoff.
 - Real **Terms of Service** (`/terms`).
 - Support email + homepage centralized in `src/lib/product.ts` (`supportEmail`, `url`).
 - Deployed to prod → https://inboxchief.email/privacy and `/terms`.
-- Scopes on Eddie’s project: `gmail.readonly` + `gmail.send`.
-- Test users present: `eddie@bannermanmenson.com`, `courtneycdx@gmail.com`.
+- Scopes on the **Inbox Chief** project: `gmail.readonly` + `gmail.send` + `calendar.readonly` (optional).
 - After OAuth client switch: existing Gmail refresh tokens stop working. App tells patrons to **Connect Gmail** again (no demo mail; call-in says mailbox needs reconnecting).
 
 ### Verification steps (Eddie)
@@ -173,6 +173,8 @@ using Vercel nameservers).
 NEXT_PUBLIC_APP_URL=https://inboxchief.email
 CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email
 GOOGLE_REDIRECT_URI=https://inboxchief.email/api/gmail/callback
+GOOGLE_CLOUD_PROJECT_ID=
+NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_ID=
 MICROSOFT_REDIRECT_URI=https://inboxchief.email/api/outlook/callback
 ```
 

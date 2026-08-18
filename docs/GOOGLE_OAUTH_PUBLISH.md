@@ -3,7 +3,7 @@
 Everything in this file requires a human in the Google Cloud Console and cannot be
 done from code. When it is finished, flipping **one** environment variable
 (`GOOGLE_OAUTH_PUBLISHED=true`) removes every "unverified app" instruction from
-the patron-facing app automatically. See [Step 9](#step-9--flip-the-flag).
+the patron-facing app automatically. See [Step 10](#step-10--flip-the-flag).
 
 **Quick paste sheet (10 clicks, status, test-user bridge):** [EDDIE_GOOGLE.md](./EDDIE_GOOGLE.md)
 
@@ -12,13 +12,26 @@ Live `/api/health` still reports `googleOauthPublished: false`. Search Console T
 for `inboxchief.email` not yet in DNS. Demo video not recorded → verification not
 submitted. Do **not** flip `GOOGLE_OAUTH_PUBLISHED=true` until Google approves.
 
-**Project facts you will need to paste:**
+## Dedicated Inbox Chief project (required)
+
+Inbox Chief must use its **own** Google Cloud OAuth project — separate from **YT Studio**
+(`gen-lang-client-0169179372`, Console name *Default Gemini Project*). **Do not modify
+that project**; it stays on YT Studio branding and credentials.
+
+Also **do not reuse** Courtney's legacy consumer project `inbox-chief-oauth`
+(`courtneycdx@gmail.com`) — Workspace policies blocked console access there.
+
+**Primary path:** create a fresh project under `eddie@bannermanmenson.com` (suggested
+Project ID `inbox-chief-oauth` or `inbox-chief-prod` if the ID is taken globally).
+Until the project exists, substitute `YOUR_PROJECT_ID` in every Console URL below.
+
+**Project facts you will need to paste (fill after Step 0):**
 
 | Field | Value |
 | --- | --- |
 | Google account that owns prod OAuth | `eddie@bannermanmenson.com` |
-| Cloud project ID | `gen-lang-client-0169179372` |
-| Prod OAuth client ID | `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls.apps.googleusercontent.com` |
+| Cloud project ID | `YOUR_PROJECT_ID` *(set `GOOGLE_CLOUD_PROJECT_ID` in Vercel after creation)* |
+| Prod OAuth client ID | *(from Step 0 → OAuth client — set `GOOGLE_CLIENT_ID` in Vercel)* |
 | Support / contact email | `eddie@bannermanmenson.com` |
 | Restricted scope | `https://www.googleapis.com/auth/gmail.readonly` |
 | Sensitive scope | `https://www.googleapis.com/auth/gmail.send` |
@@ -26,7 +39,36 @@ submitted. Do **not** flip `GOOGLE_OAUTH_PUBLISHED=true` until Google approves.
 
 ---
 
-## Step 0 — Custom domain cutover (`inboxchief.email`)
+## Step 0 — Create the Inbox Chief GCP project (do this first)
+
+Sign in as `eddie@bannermanmenson.com`.
+
+1. Open https://console.cloud.google.com/projectcreate
+2. **Project name:** `Inbox Chief`
+3. **Project ID:** prefer `inbox-chief-oauth`; if taken, use `inbox-chief-prod` or accept Google's suffix
+4. **Create** → select the new project in the top bar
+5. **Enable APIs** → https://console.cloud.google.com/apis/library  
+   Enable **Gmail API** and **Google Calendar API** (Calendar is optional Connect Calendar in Settings)
+6. **OAuth consent screen** → https://console.cloud.google.com/auth/branding?project=YOUR_PROJECT_ID  
+   Follow [Step 2](#step-2--configure-the-consent-screen-branding) (App name **Inbox Chief**, domain `inboxchief.email`)
+7. **OAuth client** → https://console.cloud.google.com/auth/clients?project=YOUR_PROJECT_ID  
+   **Create client** → **Web application** → name `Inbox Chief production`  
+   Authorized redirect URIs and JavaScript origins: see [Step 3](#step-3--confirm-the-oauth-client-redirect-uris)
+8. Copy **Client ID** and **Client secret** → set in Vercel (Production **and** Preview):
+   ```
+   GOOGLE_CLIENT_ID=<client-id>.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=<from Console — do not commit>
+   GOOGLE_CLOUD_PROJECT_ID=<your-project-id>
+   NEXT_PUBLIC_GOOGLE_CLOUD_PROJECT_ID=<same project id>
+   GOOGLE_REDIRECT_URI=https://inboxchief.email/api/gmail/callback
+   ```
+9. **Redeploy** after env vars are set. Existing patron Gmail tokens from the old
+   YT Studio client will stop working — patrons must **Connect Gmail** again.
+
+Replace `YOUR_PROJECT_ID` in all links below with your actual project ID.
+
+---
+## Step 1 — Custom domain cutover (`inboxchief.email`)
 
 **You cannot get verified on `inbox-chief-kappa.vercel.app`.** Google requires
 you to prove ownership of every authorized domain in Google Search Console, and
@@ -51,7 +93,7 @@ Before submitting verification:
    - `GOOGLE_REDIRECT_URI=https://inboxchief.email/api/gmail/callback`
    - Also update `MICROSOFT_REDIRECT_URI` if Outlook connect is live:
      `https://inboxchief.email/api/outlook/callback`
-4. In the Google client config, add the new redirect URI (see Step 3). Keep the
+4. In the Google client config, add the new redirect URI (see Step 4). Keep the
    old `inbox-chief-kappa.vercel.app` redirect until cutover is verified.
 5. Update Stripe webhook URL to `https://inboxchief.email/api/billing/webhook`
    (only once HTTPS is Valid; Stripe is not live yet).
@@ -66,7 +108,7 @@ both places **before** that deploy — otherwise call-in goes offline (401).
 
 ---
 
-## Step 1 — Verify domain ownership in Search Console
+## Step 2 — Verify domain ownership in Search Console
 
 1. Open https://search.google.com/search-console — sign in as `eddie@bannermanmenson.com`
    (must be the same account that is Owner/Editor on the Cloud project).
@@ -77,9 +119,9 @@ both places **before** that deploy — otherwise call-in goes offline (401).
 
 ---
 
-## Step 2 — Configure the consent screen (Branding)
+## Step 3 — Configure the consent screen (Branding)
 
-Open https://console.cloud.google.com/auth/branding?project=gen-lang-client-0169179372
+Open https://console.cloud.google.com/auth/branding?project=YOUR_PROJECT_ID
 
 Enter exactly:
 
@@ -103,10 +145,10 @@ Notes:
 
 ---
 
-## Step 3 — Confirm the OAuth client redirect URIs
+## Step 4 — Confirm the OAuth client redirect URIs
 
-Open https://console.cloud.google.com/auth/clients?project=gen-lang-client-0169179372
-→ open the client `515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls...`
+Open https://console.cloud.google.com/auth/clients?project=YOUR_PROJECT_ID
+→ open your **Inbox Chief production** Web client
 
 Authorized redirect URIs must contain (keep the Vercel one until the domain cutover is done):
 
@@ -124,9 +166,9 @@ https://www.inboxchief.email
 
 ---
 
-## Step 4 — Declare exactly these scopes
+## Step 5 — Declare exactly these scopes
 
-Open https://console.cloud.google.com/auth/scopes?project=gen-lang-client-0169179372
+Open https://console.cloud.google.com/auth/scopes?project=YOUR_PROJECT_ID
 
 Add only:
 
@@ -142,7 +184,7 @@ bounced for violating minimum-scope policy.
 
 ---
 
-## Step 5 — Scope justification (copy-paste)
+## Step 6 — Scope justification (copy-paste)
 
 Paste each block into the matching justification box in the Verification Center.
 
@@ -203,7 +245,7 @@ assistant never creates, edits, or deletes events.
 
 ---
 
-## Step 6 — Limited Use disclosure (already live)
+## Step 7 — Limited Use disclosure (already live)
 
 Google will check that your privacy policy contains the Limited Use language.
 This is **already implemented** and deployed at `/privacy` under the heading
@@ -218,7 +260,7 @@ at `https://inboxchief.email/privacy` before submitting.
 
 ---
 
-## Step 7 — Demo video
+## Step 8 — Demo video
 
 Requirements: unlisted YouTube video, one link only, English, recorded against
 the **production** domain, and the browser URL bar must be visible so the
@@ -229,7 +271,7 @@ reviewer can read the OAuth client ID during consent.
 **1. Show the client ID (10s).** Screen-record the Cloud Console client page with
 the client ID visible.
 
-> "This is the Inbox Chief OAuth client, ID 515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls, in project gen-lang-client-0169179372."
+> "This is the Inbox Chief OAuth client, ID [YOUR_CLIENT_ID], in project [YOUR_PROJECT_ID]."
 
 **2. Show the homepage (15s).** Load `https://inboxchief.email` with the URL bar visible.
 
@@ -265,13 +307,13 @@ Upload as **Unlisted**, then paste the link into the Verification Center.
 
 ---
 
-## Step 8 — Submit, then the security assessment
+## Step 9 — Submit, then the security assessment
 
 1. Open the Verification Center:
-   https://console.cloud.google.com/auth/verification?project=gen-lang-client-0169179372
+   https://console.cloud.google.com/auth/verification?project=YOUR_PROJECT_ID
 2. Confirm **Branding status** is published first — data-access verification cannot
    be requested until branding is approved.
-3. Fill in the scope justifications (Step 5) and the demo video link (Step 7).
+3. Fill in the scope justifications (Step 6) and the demo video link (Step 8).
 4. Click **Submit for verification**.
 5. Watch the inbox of `eddie@bannermanmenson.com` — all reviewer correspondence
    goes to project owners/editors by email, and unanswered questions stall the review.
@@ -295,7 +337,7 @@ being a test user. Keep onboarding patrons via the test-user path meanwhile.
 
 ---
 
-## Step 9 — Flip the flag
+## Step 10 — Flip the flag
 
 Only when publishing status is **In production**, verification is approved, **and**
 a brand-new Gmail that is *not* in the test-user list connects cleanly:
@@ -332,7 +374,7 @@ Google's 100-test-user cap applies, which is far above the near-term target.
 
 1. Patron calls +1 405 716 9240 and completes voice signup. Their Gmail lands in
    the pending queue automatically — no data entry by you.
-2. Open https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
+2. Open https://console.cloud.google.com/auth/audience?project=YOUR_PROJECT_ID
 3. **Add users** → paste the Gmail → **Save**.
 4. Open https://inboxchief.email/dashboard/admin/onboard → in
    **Pending voice signups**, use **Copy Gmail** to get the exact address, then

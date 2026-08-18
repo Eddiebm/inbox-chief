@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { googleOAuthAudienceUrl } from "@/lib/google-oauth-console";
 import { product } from "@/lib/product";
 
 type ChecklistItem = {
@@ -11,9 +12,8 @@ type ChecklistItem = {
   copyValue?: string;
 };
 
-/** Deep link to the prod project's test-user list — see docs/GOOGLE_OAUTH_PUBLISH.md. */
-const GOOGLE_TEST_USERS_URL =
-  "https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372";
+/** Deep link to the Inbox Chief OAuth project's test-user list — see docs/GOOGLE_OAUTH_PUBLISH.md. */
+const GOOGLE_TEST_USERS_URL = googleOAuthAudienceUrl();
 
 type PendingProvisioning = {
   id: string;

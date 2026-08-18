@@ -26,18 +26,18 @@ you to prove ownership of every authorized domain in Google Search Console, and
 it asks for the "top private domain". `vercel.app` is on the public suffix list,
 so it is not a domain you can own or verify.
 
-**Domain purchased:** `inboxchief.email` (canonical apex; `www` redirects to apex).
+**Domain:** `inboxchief.email` (target canonical apex; `www` should redirect to apex).
 
-Finish cutover before submitting verification:
+Cutover status (2026-08-17): domain is attached, HTTPS works, `/api/health` returns
+JSON on both hosts. **Eddie still must flip redirect** if apex currently 308→www
+(see [EDDIE_TODAY.md](./EDDIE_TODAY.md) step 1).
+
+Before submitting verification:
 
 1. In the Vercel account that owns project `inbox-chief` → **Settings → Domains**,
-   add `inboxchief.email` and `www.inboxchief.email`. Set **Redirect** so
-   `www` → `inboxchief.email` (apex canonical).
-   Nameservers are already `ns1.vercel-dns.com` / `ns2.vercel-dns.com` (Name.com).
-   Until the domain is attached to this project, HTTP returns
-   `DEPLOYMENT_NOT_FOUND` and HTTPS has no certificate — that is expected.
-2. Wait until both domain cards show **Valid Configuration** and
-   `https://inboxchief.email/api/health` returns JSON.
+   confirm `inboxchief.email` and `www.inboxchief.email` show **Valid Configuration**.
+   Set **Redirect** so `www` → `inboxchief.email` (apex canonical).
+2. Confirm `https://inboxchief.email/api/health` returns JSON on apex (not only www).
 3. Set these Vercel environment variables (Production **and** Preview):
    - `NEXT_PUBLIC_APP_URL=https://inboxchief.email`
    - `CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email`
@@ -108,10 +108,11 @@ https://inboxchief.email/api/gmail/callback
 https://inbox-chief-kappa.vercel.app/api/gmail/callback
 ```
 
-Authorized JavaScript origins:
+Authorized JavaScript origins (include both while apex/www redirect is settling):
 
 ```
 https://inboxchief.email
+https://www.inboxchief.email
 ```
 
 ---

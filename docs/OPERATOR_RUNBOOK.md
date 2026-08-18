@@ -20,8 +20,8 @@
 
 Target: **onboard 5 patrons without chaos** (&lt;10 min each).
 
-Live (current): https://inbox-chief-kappa.vercel.app  
-Canonical (after domain attach): https://inboxchief.email  
+Live (current): https://inboxchief.email (www may redirect; apex canonical target)  
+Legacy Vercel URL: https://inbox-chief-kappa.vercel.app  
 Admin onboard: `/dashboard/admin/onboard`  
 Voice provisioning queue: `/dashboard/admin/provisioning`  
 Health: `/api/health`
@@ -68,9 +68,7 @@ before it:
    call-in identity, and a provisioning request.
 5. If Twilio SMS env vars are configured, the patron receives a private 24-hour
    link. Otherwise the call speaks an eight-character code to enter at
-   `https://inboxchief.email/provision` (until domain cutover completes, use
-   `https://inbox-chief-kappa.vercel.app/provision`; the direct result is
-   `/provision/CODE`).
+   `https://inboxchief.email/provision` (direct result: `/provision/CODE`).
 6. Until Gmail is connected, calls say the phone is saved and direct the patron
    back to the link/operator. They never read sample mail or attachment contents.
 7. After Google consent succeeds, the next call says **“You’re connected. Say
@@ -80,8 +78,7 @@ before it:
 
 1. Sign in as an address in `OPERATOR_EMAILS`.
 2. Open `https://inboxchief.email/dashboard/admin/provisioning`
-   (until cutover: `https://inbox-chief-kappa.vercel.app/dashboard/admin/provisioning`;
-   alias of the queue on Admin onboard).
+   (alias of the queue on Admin onboard).
 3. Under **Pending voice signups**, copy the Gmail address.
 4. In Google Cloud, open **Google Auth Platform → Audience → Test users**, add
    that exact Gmail, and save.
@@ -149,37 +146,26 @@ screen and speech, and `/api/health` shows `googleOauthPublished: true`.
 
 ## Custom domain (`inboxchief.email`)
 
-Canonical production host: **https://inboxchief.email** (www → apex redirect).
+Target canonical host: **https://inboxchief.email** (www → apex redirect).
 
-Legacy until DNS/env cutover is complete: https://inbox-chief-kappa.vercel.app
+**Status (2026-08-17):** Both apex and www resolve on Vercel with valid HTTPS.
+`/api/health` returns JSON on both. As of last audit, apex **308-redirects to www**
+— flip in Vercel Domains so **apex is Production** and **www redirects to apex**
+(see [EDDIE_TODAY.md](./EDDIE_TODAY.md) step 1).
 
-### DNS status (as of cutover prep)
+Legacy Vercel host: https://inbox-chief-kappa.vercel.app
 
-Registrar: **Name.com** (purchased 2026-08-17).  
-Nameservers already delegate to Vercel:
+### DNS
 
-```
-ns1.vercel-dns.com
-ns2.vercel-dns.com
-```
+Registrar: **Name.com**. Nameservers: `ns1.vercel-dns.com` / `ns2.vercel-dns.com`.
+Manage records in **Vercel → Domains → inboxchief.email** (not Name.com while
+using Vercel nameservers).
 
-Apex + www already resolve on Vercel’s anycast IPs. **Do not** add conflicting A/CNAME
-records at Name.com while nameservers are Vercel — manage records in
-**Vercel → Domains → inboxchief.email → DNS Records** (or Project → Domains).
+### Vercel Domains checklist
 
-If DNS were external (not Vercel nameservers), the usual records would be:
-
-| Host | Type | Value |
-| --- | --- | --- |
-| `@` / `inboxchief.email` | A | `76.76.21.21` (or the IP shown on the domain card) |
-| `www` | CNAME | `cname.vercel-dns.com` (confirm on domain card) |
-
-**Eddie still must (in the Vercel account that owns `inbox-chief`):**
-
-1. Project `inbox-chief` → **Settings → Domains** → add `inboxchief.email` and `www.inboxchief.email`
-2. Set www **Redirect to** `inboxchief.email` (apex canonical)
-3. Wait until both show **Valid Configuration** and HTTPS works (TLS was still
-   provisioning / failing at last check)
+1. Both `inboxchief.email` and `www.inboxchief.email` show **Valid Configuration**
+2. www **Redirect to** `inboxchief.email` (apex canonical)
+3. Set Production URL env vars (see below) and redeploy
 
 ### Env (Vercel Production + Preview)
 

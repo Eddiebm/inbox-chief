@@ -141,7 +141,7 @@ describe("call minute usage with purchased balance", () => {
     ).toBe("approaching");
     expect(
       buildSpokenUsageWarning("approaching", CTX),
-    ).toContain("buy more minutes");
+    ).toContain("included call minutes");
   });
 
   it("hard-stops when included and purchased are both exhausted", () => {
@@ -185,7 +185,7 @@ describe("call minute usage with purchased balance", () => {
     expect(usage.hardCapReached).toBe(false);
     expect(usage.warningLevel).toBe("included_exhausted");
     expect(usage.totalMinutesRemaining).toBe(30);
-    expect(usage.spokenWarning).toContain("purchased minutes");
+    expect(usage.spokenWarning).toContain("purchased call minutes");
     expect(usage.plainSummary).toContain("30 left");
   });
 

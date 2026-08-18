@@ -5,6 +5,7 @@ import {
   emptyCallMinuteUsage,
   loadCallMinuteUsageForOrg,
 } from "@/lib/billing/call-usage-server";
+import { isSoftCallUsageWarning } from "@/lib/billing/call-usage";
 import {
   answerCallInQuestionWithLlm,
   demoMailboxSnapshot,
@@ -119,7 +120,7 @@ export async function POST(request: Request) {
   ) {
     try {
       const usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
-      if (usage.warningLevel !== "none" && usage.spokenWarning) {
+      if (isSoftCallUsageWarning(usage.warningLevel) && usage.spokenWarning) {
         spoken = `${spoken} ${usage.spokenWarning}`;
       }
     } catch {
@@ -160,8 +161,8 @@ export async function GET() {
   ) {
     try {
       usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
-      if (usage.warningLevel !== "none" && usage.spokenWarning) {
-        opening = `${opening} ${usage.spokenWarning}`;
+      if (usage.hardCapReached) {
+        opening = usage.spokenCapReached;
       }
     } catch {
       /* keep default opening */

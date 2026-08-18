@@ -211,7 +211,14 @@ export function buildSpokenCapReached(ctx: CallUsageMessageContext): string {
  * unmetered calls that Inbox Chief pays VAPI for.
  */
 export const USAGE_UNAVAILABLE_SPOKEN =
-  "I can't check your call minute balance right now, so I can't read mail or start a new request on this call. This is a problem on our side, not yours. Please try again in a few minutes, or contact Inbox Chief support. You can still check your connection status or finish setting up.";
+  "I can't check your call minutes right now, so I can't read mail or start a new request on this call. This is a problem on our side, not yours. Please try again in a few minutes, or contact Inbox Chief support. You can still check your connection status or finish setting up.";
+
+/** Soft warnings append after a tool result — never replace the opening or block reading. */
+export function isSoftCallUsageWarning(
+  level: CallUsageWarningLevel,
+): boolean {
+  return level === "approaching" || level === "included_exhausted";
+}
 
 export function buildSpokenUsageWarning(
   level: CallUsageWarningLevel,
@@ -222,10 +229,10 @@ export function buildSpokenUsageWarning(
       return buildSpokenCapReached(ctx);
     case "included_exhausted": {
       const left = formatMinutesPlain(ctx.purchasedMinutesRemaining);
-      return `You've used your included minutes for this period. You're now using purchased minutes. You have about ${left} purchased minutes left. When those run out, you can buy more in the Inbox Chief dashboard.`;
+      return `Heads up: included call minutes are used up. About ${left} of purchased call minutes remain.`;
     }
     case "approaching":
-      return "You've used most of your included call minutes this period. When they run out, you can buy more minutes in the dashboard, upgrade, or wait for your next period. I won't hang up mid-email.";
+      return "Heads up: you're nearing your included call minutes for this period.";
     case "none":
       return "";
     default: {

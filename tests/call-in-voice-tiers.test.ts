@@ -85,6 +85,7 @@ describe("call-in voice tiers", () => {
       voiceTier: "premium",
     });
     expect(std.serverMessages).toContain("tool-calls");
+    expect(std.serverMessages).toContain("assistant-request");
     expect((std.voice as { provider: string }).provider).toBe("cartesia");
     expect((std.voice as { language?: string }).language).toBe("en");
     // Default rate (brisk) → Cartesia numeric speed applied.

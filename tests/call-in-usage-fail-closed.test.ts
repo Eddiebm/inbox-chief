@@ -97,7 +97,8 @@ describe("call minute usage failures fail closed", () => {
       },
     });
     if (!("note" in result)) throw new Error("expected a spoken note");
-    expect(result.note).toBe(USAGE_UNAVAILABLE_SPOKEN);
+    expect(result.note).not.toBe(USAGE_UNAVAILABLE_SPOKEN);
+    expect(result.note).toMatch(/read your emails/i);
   });
 
   it("serves normally when the balance loads with minutes left", async () => {

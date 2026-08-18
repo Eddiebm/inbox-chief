@@ -13,7 +13,10 @@ import {
   type CallInSpeechRate,
 } from "@/lib/call-in/speech-rate";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
-import { USAGE_UNAVAILABLE_SPOKEN } from "@/lib/billing/call-usage";
+import {
+  isSoftCallUsageWarning,
+  USAGE_UNAVAILABLE_SPOKEN,
+} from "@/lib/billing/call-usage";
 import {
   googleConsentGuidanceSpoken,
   isGoogleOauthPublished,
@@ -134,9 +137,9 @@ export type VapiWebhookHandleResult =
     };
 
 /**
- * Opening speech plus minute warning at 80%, or the hard-stop message at 100%.
- * At the hard cap the opening leads with the exhausted message so a blind
- * patron immediately knows call-in is paused (tools are also denied).
+ * Opening speech. Only the hard cap replaces the greeting — soft minute
+ * warnings append after tool results so patrons still hear mail when minutes
+ * remain.
  */
 async function openingWithUsageWarning(
   snapshot: Awaited<
@@ -154,13 +157,11 @@ async function openingWithUsageWarning(
   try {
     const usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
     if (usage.hardCapReached) return usage.spokenCapReached;
-    if (usage.warningLevel === "none" || !usage.spokenWarning) return base;
-    return `${base} ${usage.spokenWarning}`;
+    return base;
   } catch (err) {
-    // Matches the fail-closed tool behaviour: say so up front instead of
-    // inviting the caller to spend minutes we cannot account for.
+    // Keep the normal greeting; billable tools fail closed if usage cannot load.
     console.error("[call-in] minute usage load failed during opening", err);
-    return USAGE_UNAVAILABLE_SPOKEN;
+    return base;
   }
 }
 
@@ -205,7 +206,10 @@ export async function handleVapiCallInWebhook(
         if (usage.hardCapReached) {
           // Hard stop: deny billable tools; speak the exhausted message.
           hardCap = { reached: true, spoken: usage.spokenCapReached };
-        } else if (usage.warningLevel !== "none" && usage.spokenWarning) {
+        } else if (
+          isSoftCallUsageWarning(usage.warningLevel) &&
+          usage.spokenWarning
+        ) {
           usageWarning = usage.spokenWarning;
         }
       } catch (err) {

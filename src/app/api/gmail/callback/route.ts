@@ -8,7 +8,7 @@ function appOrigin() {
   return (
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
     process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
-    "https://inbox-chief-kappa.vercel.app"
+    "https://inboxchief.email"
   );
 }
 

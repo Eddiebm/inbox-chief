@@ -44,7 +44,7 @@ function appBaseUrl(): string {
   return (
     process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    "https://inbox-chief-kappa.vercel.app"
+    "https://inboxchief.email"
   ).replace(/\/$/, "");
 }
 

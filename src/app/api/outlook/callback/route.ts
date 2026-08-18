@@ -10,7 +10,7 @@ function settingsRedirect(params: Record<string, string>) {
     "/dashboard/settings",
     process.env.NEXT_PUBLIC_APP_URL?.trim() ||
       process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
-      "https://inbox-chief-kappa.vercel.app",
+      "https://inboxchief.email",
   );
   for (const [key, value] of Object.entries(params)) {
     url.searchParams.set(key, value);

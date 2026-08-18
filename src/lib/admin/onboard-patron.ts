@@ -51,7 +51,7 @@ export type OnboardPatronResult = {
   message: string;
 };
 
-const SIGN_IN_URL = "https://inbox-chief-kappa.vercel.app/signin";
+const SIGN_IN_URL = `${product.url.replace(/\/$/, "")}/signin`;
 
 function slugify(input: string) {
   return (

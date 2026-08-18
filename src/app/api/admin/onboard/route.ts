@@ -4,6 +4,7 @@ import { onboardPatron } from "@/lib/admin/onboard-patron";
 import { getCurrentUser } from "@/lib/auth";
 import { isGoogleOauthPublished } from "@/lib/google-oauth-publication";
 import { isOperatorEmail } from "@/lib/operator";
+import { product } from "@/lib/product";
 
 const schema = z.object({
   patronName: z.string().trim().min(2).max(120),
@@ -145,7 +146,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     googlePublished: isGoogleOauthPublished(),
-    signInUrl: "https://inbox-chief-kappa.vercel.app/signin",
+    signInUrl: `${product.url.replace(/\/$/, "")}/signin`,
     callInNumber: process.env.NEXT_PUBLIC_VAPI_CALL_IN_NUMBER ?? "+14057169240",
     pendingProvisioning,
   });

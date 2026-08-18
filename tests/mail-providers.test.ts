@@ -84,7 +84,7 @@ describe("outlook oauth config gates", () => {
     process.env.MICROSOFT_CLIENT_ID = "client";
     process.env.MICROSOFT_CLIENT_SECRET = "secret";
     process.env.MICROSOFT_REDIRECT_URI =
-      "https://inbox-chief-kappa.vercel.app/api/outlook/callback";
+      "https://inboxchief.email/api/outlook/callback";
 
     const status = getOutlookOAuthConfig();
     expect(status.ok).toBe(false);
@@ -114,7 +114,7 @@ describe("outlook oauth config gates", () => {
     process.env.MICROSOFT_CLIENT_ID = "client-id";
     process.env.MICROSOFT_CLIENT_SECRET = "client-secret";
     process.env.MICROSOFT_REDIRECT_URI =
-      "https://inbox-chief-kappa.vercel.app/api/outlook/callback";
+      "https://inboxchief.email/api/outlook/callback";
     delete process.env.MICROSOFT_TENANT_ID;
 
     const status = getOutlookOAuthConfig();

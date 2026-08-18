@@ -14,7 +14,7 @@ Inbox Chief is configured for Cloudflare Workers via OpenNext (`npm run deploy:c
 | Host | URL |
 |------|-----|
 | Cloudflare Worker | https://inbox-chief.eddiebm.workers.dev |
-| Vercel (Node + real DB path) | https://inbox-chief-kappa.vercel.app |
+| Vercel (Node + real DB path) | https://inboxchief.email |
 
 CF builds set `OPEN_NEXT_WORKER=1` so `@/lib/db-node` resolves to `db-node.stub.ts` (keeps Prisma/pg out of the Worker). Gzipped upload landed around **~1.0 MiB** after that (under the free **3 MiB** limit). Paid Workers raise the limit to **10 MiB** if you later need full Prisma on Workers (e.g. Hyperdrive).
 

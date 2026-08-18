@@ -220,7 +220,7 @@ describe("production secret guard", () => {
 });
 
 describe("same-origin redirect allowlist", () => {
-  const origin = "https://inbox-chief-kappa.vercel.app";
+  const origin = "https://inboxchief.email";
 
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
@@ -239,17 +239,17 @@ describe("same-origin redirect allowlist", () => {
   it("rejects external origins and non-http schemes", () => {
     expect(sameOriginRedirect("https://evil.example.com/steal", origin)).toBeNull();
     expect(
-      sameOriginRedirect(`https://inbox-chief-kappa.vercel.app.evil.com/x`, origin),
+      sameOriginRedirect(`https://inboxchief.email.evil.com/x`, origin),
     ).toBeNull();
     expect(sameOriginRedirect("javascript:alert(1)", origin)).toBeNull();
     expect(sameOriginRedirect("//evil.example.com/x", origin)).toBeNull();
   });
 
   it("allows the configured public app URL", () => {
-    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.inboxchief.com");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://app.inboxchief.email");
     expect(
-      sameOriginRedirect("https://app.inboxchief.com/dashboard", origin),
-    ).toBe("https://app.inboxchief.com/dashboard");
+      sameOriginRedirect("https://app.inboxchief.email/dashboard", origin),
+    ).toBe("https://app.inboxchief.email/dashboard");
   });
 });
 

@@ -12,7 +12,7 @@ export const runtime = "nodejs";
  * Handles tool-calls + end-of-call. Never sends email.
  *
  * Production URL:
- *   https://inbox-chief-kappa.vercel.app/api/call-in/vapi/webhook
+ *   https://inboxchief.email/api/call-in/vapi/webhook
  */
 export async function POST(request: Request) {
   const auth = verifyVapiWebhookSecret(request.headers);

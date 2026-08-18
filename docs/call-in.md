@@ -42,8 +42,8 @@ Shown in the app when `NEXT_PUBLIC_VAPI_CALL_IN_NUMBER` is set.
 
 | Provider | URL |
 | -------- | --- |
-| **VAPI (primary)** | `POST https://inbox-chief-kappa.vercel.app/api/call-in/vapi/webhook` |
-| Twilio (fallback) | `POST https://inbox-chief-kappa.vercel.app/api/call-in/twilio/voice` |
+| **VAPI (primary)** | `POST https://inboxchief.email/api/call-in/vapi/webhook` |
+| Twilio (fallback) | `POST https://inboxchief.email/api/call-in/twilio/voice` |
 
 The VAPI webhook handles `assistant-request`, `tool-calls`, and `end-of-call-report`. Tools answer briefing / read emails / needs attention / drafts / approvals / follow-ups / connection status via `src/lib/call-in/assistant.ts`.
 
@@ -125,7 +125,7 @@ If automation cannot auth to VAPI:
 2. Left nav → **Assistants** → **Create Assistant** (or open an existing Inbox Chief assistant).
 3. Set **name** to `Inbox Chief — Anytime Call-in`.
 4. Set **Server URL** to:
-   `https://inbox-chief-kappa.vercel.app/api/call-in/vapi/webhook`
+   `https://inboxchief.email/api/call-in/vapi/webhook`
 5. Save / publish the assistant (copy the assistant id if shown).
 6. Left nav → **Phone Numbers**.
 7. Click **+1 (405) 716-9240** (`+14057169240`).

@@ -48,7 +48,7 @@ live from env in `src/app/api/health/route.ts` — never hardcoded.
 2. **Enable the Billing Portal**: Settings → Billing → Customer portal → activate
    (allow cancel + update payment method). Required for the Manage-subscription link.
 3. **Create the webhook endpoint**
-   - URL: `https://inbox-chief-kappa.vercel.app/api/billing/webhook`
+   - URL: `https://inboxchief.email/api/billing/webhook`
    - Events to send:
      - `checkout.session.completed`
      - `checkout.session.async_payment_succeeded`

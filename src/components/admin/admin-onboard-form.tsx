@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useState, type FormEvent } from "react";
+import { product } from "@/lib/product";
 
 type ChecklistItem = {
   id: string;
@@ -37,7 +38,7 @@ export function AdminOnboardForm() {
   const [resetPassword, setResetPassword] = useState(false);
   const [googlePublished, setGooglePublished] = useState(false);
   const [signInUrl, setSignInUrl] = useState(
-    "https://inbox-chief-kappa.vercel.app/signin",
+    `${product.url.replace(/\/$/, "")}/signin`,
   );
   const [status, setStatus] = useState(
     "Enter patron name, Gmail, and phone. Target: 5 patrons without chaos.",

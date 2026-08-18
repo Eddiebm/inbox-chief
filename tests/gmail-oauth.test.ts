@@ -29,7 +29,7 @@ describe("gmail oauth config gates", () => {
     process.env.GOOGLE_CLIENT_ID = "client";
     process.env.GOOGLE_CLIENT_SECRET = "secret";
     process.env.GOOGLE_REDIRECT_URI =
-      "https://inbox-chief-kappa.vercel.app/api/gmail/callback";
+      "https://inboxchief.email/api/gmail/callback";
 
     const status = getGmailOAuthConfig();
     expect(status.ok).toBe(false);

@@ -20,7 +20,8 @@
 
 Target: **onboard 5 patrons without chaos** (&lt;10 min each).
 
-Live: https://inbox-chief-kappa.vercel.app  
+Live (current): https://inbox-chief-kappa.vercel.app  
+Canonical (after domain attach): https://inboxchief.email  
 Admin onboard: `/dashboard/admin/onboard`  
 Voice provisioning queue: `/dashboard/admin/provisioning`  
 Health: `/api/health`
@@ -67,7 +68,8 @@ before it:
    call-in identity, and a provisioning request.
 5. If Twilio SMS env vars are configured, the patron receives a private 24-hour
    link. Otherwise the call speaks an eight-character code to enter at
-   `https://inbox-chief-kappa.vercel.app/provision` (the direct result is
+   `https://inboxchief.email/provision` (until domain cutover completes, use
+   `https://inbox-chief-kappa.vercel.app/provision`; the direct result is
    `/provision/CODE`).
 6. Until Gmail is connected, calls say the phone is saved and direct the patron
    back to the link/operator. They never read sample mail or attachment contents.
@@ -77,8 +79,9 @@ before it:
 ### Operator steps until OAuth is Published
 
 1. Sign in as an address in `OPERATOR_EMAILS`.
-2. Open `https://inbox-chief-kappa.vercel.app/dashboard/admin/provisioning`
-   (alias of the queue on Admin onboard).
+2. Open `https://inboxchief.email/dashboard/admin/provisioning`
+   (until cutover: `https://inbox-chief-kappa.vercel.app/dashboard/admin/provisioning`;
+   alias of the queue on Admin onboard).
 3. Under **Pending voice signups**, copy the Gmail address.
 4. In Google Cloud, open **Google Auth Platform → Audience → Test users**, add
    that exact Gmail, and save.
@@ -115,7 +118,7 @@ public provision URL are the fallback handoff.
 - Real, verification-ready **Privacy Policy** (`/privacy`) with the Google API Services **Limited Use disclosure**, scopes, retention/deletion, and contact.
 - Real **Terms of Service** (`/terms`).
 - Support email + homepage centralized in `src/lib/product.ts` (`supportEmail`, `url`).
-- Deployed to prod → https://inbox-chief-kappa.vercel.app/privacy and `/terms`.
+- Deployed to prod → https://inboxchief.email/privacy and `/terms`.
 - Scopes on Eddie’s project: `gmail.readonly` + `gmail.send`.
 - Test users present: `eddie@bannermanmenson.com`, `courtneycdx@gmail.com`.
 - After OAuth client switch: existing Gmail refresh tokens stop working. App tells patrons to **Connect Gmail** again (no demo mail; call-in says mailbox needs reconnecting).
@@ -144,10 +147,59 @@ screen and speech, and `/api/health` shows `googleOauthPublished: true`.
 > Submitting verification does **not** immediately unblock non-test users. Keep the flag
 > `false` and keep adding test users until Google approves.
 
-## Custom domain (later)
+## Custom domain (`inboxchief.email`)
 
-- Point a custom domain at the Vercel project when ready.
-- Update Google / Microsoft redirect URIs and `NEXT_PUBLIC_APP_URL` / `CALL_IN_PUBLIC_BASE_URL` to match.
+Canonical production host: **https://inboxchief.email** (www → apex redirect).
+
+Legacy until DNS/env cutover is complete: https://inbox-chief-kappa.vercel.app
+
+### DNS status (as of cutover prep)
+
+Registrar: **Name.com** (purchased 2026-08-17).  
+Nameservers already delegate to Vercel:
+
+```
+ns1.vercel-dns.com
+ns2.vercel-dns.com
+```
+
+Apex + www already resolve on Vercel’s anycast IPs. **Do not** add conflicting A/CNAME
+records at Name.com while nameservers are Vercel — manage records in
+**Vercel → Domains → inboxchief.email → DNS Records** (or Project → Domains).
+
+If DNS were external (not Vercel nameservers), the usual records would be:
+
+| Host | Type | Value |
+| --- | --- | --- |
+| `@` / `inboxchief.email` | A | `76.76.21.21` (or the IP shown on the domain card) |
+| `www` | CNAME | `cname.vercel-dns.com` (confirm on domain card) |
+
+**Eddie still must (in the Vercel account that owns `inbox-chief`):**
+
+1. Project `inbox-chief` → **Settings → Domains** → add `inboxchief.email` and `www.inboxchief.email`
+2. Set www **Redirect to** `inboxchief.email` (apex canonical)
+3. Wait until both show **Valid Configuration** and HTTPS works (TLS was still
+   provisioning / failing at last check)
+
+### Env (Vercel Production + Preview)
+
+```
+NEXT_PUBLIC_APP_URL=https://inboxchief.email
+CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email
+GOOGLE_REDIRECT_URI=https://inboxchief.email/api/gmail/callback
+MICROSOFT_REDIRECT_URI=https://inboxchief.email/api/outlook/callback
+```
+
+Do **not** change `VAPI_WEBHOOK_SECRET` unless Eddie provides/confirms the value.
+Set/confirm that secret in Vercel **and** VAPI `X-Vapi-Secret` before any deploy
+that fails closed on a missing webhook secret.
+
+### External dashboards after DNS is Valid
+
+- Google OAuth: see [GOOGLE_OAUTH_PUBLISH.md](./GOOGLE_OAUTH_PUBLISH.md) Step 2–3
+- Stripe webhook: `https://inboxchief.email/api/billing/webhook`
+- VAPI server URL: `https://inboxchief.email/api/call-in/vapi/webhook`
+  then `npm run vapi:setup-call-in`
 
 ---
 

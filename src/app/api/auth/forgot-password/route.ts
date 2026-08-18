@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       const token = createPasswordResetToken(user.id, user.email);
       const base =
         process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-        "https://inbox-chief-kappa.vercel.app";
+        "https://inboxchief.email";
       const resetUrl = `${base.replace(/\/$/, "")}/reset-password?token=${encodeURIComponent(token)}`;
       await sendResetEmail(user.email, resetUrl);
     }

@@ -23,7 +23,7 @@ vi.mock("@/lib/db-node", () => ({
 import { POST as checkoutPost } from "@/app/api/billing/checkout/route";
 import { POST as portalPost } from "@/app/api/billing/portal/route";
 
-const ORIGIN = "https://inbox-chief-kappa.vercel.app";
+const ORIGIN = "https://inboxchief.email";
 const CHECKOUT_URL = `${ORIGIN}/api/billing/checkout`;
 const PORTAL_URL = `${ORIGIN}/api/billing/portal`;
 

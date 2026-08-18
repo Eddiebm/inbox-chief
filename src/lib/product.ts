@@ -7,7 +7,7 @@ export const product = {
     process.env.NEXT_PUBLIC_PRODUCT_PROMISE ??
     "Inbox Chief gives busy people the benefits of a trusted personal assistant without surrendering control of their email.",
   url:
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://inbox-chief-kappa.vercel.app",
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://inboxchief.email",
   supportEmail:
     process.env.NEXT_PUBLIC_SUPPORT_EMAIL ?? "eddie@bannermanmenson.com",
 } as const;

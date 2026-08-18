@@ -12,13 +12,13 @@
  *   VAPI_ASSISTANT_ID=...              # update existing assistant
  *   VAPI_PHONE_NUMBER_ID=...           # skip phone lookup
  *   NEXT_PUBLIC_VAPI_CALL_IN_NUMBER=... # E.164 to find/assign (default +14057169240)
- *   CALL_IN_PUBLIC_BASE_URL=https://inbox-chief-kappa.vercel.app
+ *   CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email
  */
 import "dotenv/config";
 import { buildCallInAssistantPayload } from "../src/lib/call-in/vapi-tools";
 
 const VAPI_BASE = "https://api.vapi.ai";
-const DEFAULT_PROD_BASE = "https://inbox-chief-kappa.vercel.app";
+const DEFAULT_PROD_BASE = "https://inboxchief.email";
 const DEFAULT_CALL_IN_NUMBER = "+14057169240";
 
 type VapiPhoneNumber = {
@@ -103,7 +103,7 @@ Steps for Eddie (Dashboard — if you prefer UI):
   1. Open https://dashboard.vapi.ai and sign in
   2. Left nav → Assistants → Create Assistant
        Name: Inbox Chief — Anytime Call-in
-       Server URL: https://inbox-chief-kappa.vercel.app/api/call-in/vapi/webhook
+       Server URL: https://inboxchief.email/api/call-in/vapi/webhook
        Save / publish
   3. Left nav → Phone Numbers → click +1 (405) 716-9240
   4. Inbound Assistant / Assistant → select "Inbox Chief — Anytime Call-in"

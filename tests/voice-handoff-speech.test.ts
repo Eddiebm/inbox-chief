@@ -26,17 +26,17 @@ const provision = {
   phoneE164: "+14055550123",
   gmail: "patron@gmail.com",
   shortCode: "ABCD2345",
-  magicLink: "https://inboxchief.com/api/provision/connect?token=signed",
-  provisionUrl: "https://inboxchief.com/provision/ABCD2345",
-  provisionEntryUrl: "https://inboxchief.com/provision",
+  magicLink: "https://inboxchief.email/api/provision/connect?token=signed",
+  provisionUrl: "https://inboxchief.email/provision/ABCD2345",
+  provisionEntryUrl: "https://inboxchief.email/provision",
   status: "needs_google_consent" as const,
   created: true,
 };
 
 describe("speakUrlForVoice", () => {
   it("spells hosts and paths a caller can type without seeing them", () => {
-    expect(speakUrlForVoice("https://inboxchief.com/provision")).toBe(
-      "inboxchief dot com slash provision",
+    expect(speakUrlForVoice("https://inboxchief.email/provision")).toBe(
+      "inboxchief dot email slash provision",
     );
     expect(
       speakUrlForVoice("https://inbox-chief-kappa.vercel.app/provision"),
@@ -93,7 +93,7 @@ describe("voice signup handoff speech", () => {
       snapshot,
     });
 
-    expect(handled.spoken).toMatch(/inboxchief dot com slash provision/);
+    expect(handled.spoken).toMatch(/inboxchief dot email slash provision/);
     expect(handled.spoken).toMatch(/A B C D 2 3 4 5/);
     expect(handled.spoken).not.toMatch(/vercel/i);
   });

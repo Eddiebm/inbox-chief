@@ -298,7 +298,7 @@ export async function handleVapiCallInWebhook(
     const baseUrl =
       process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
       process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-      "https://inbox-chief-kappa.vercel.app";
+      "https://inboxchief.email";
 
     let voiceTier: "standard" | "premium" = "standard";
     let speechRate: CallInSpeechRate = DEFAULT_CALL_IN_SPEECH_RATE;

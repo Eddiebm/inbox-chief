@@ -19,26 +19,43 @@ the patron-facing app automatically. See [Step 9](#step-9--flip-the-flag).
 
 ---
 
-## Step 0 — Buy a custom domain first (hard blocker)
+## Step 0 — Custom domain cutover (`inboxchief.email`)
 
 **You cannot get verified on `inbox-chief-kappa.vercel.app`.** Google requires
 you to prove ownership of every authorized domain in Google Search Console, and
 it asks for the "top private domain". `vercel.app` is on the public suffix list,
-so it is not a domain you can own or verify, and Google explicitly tells apps on
-a shared provider domain to move to their own domain.
+so it is not a domain you can own or verify.
 
-Do this before anything else:
+**Domain purchased:** `inboxchief.email` (canonical apex; `www` redirects to apex).
 
-1. Buy a domain you control (e.g. `inboxchief.com`). Vercel → Domains, or any registrar.
-2. Add it to the Vercel project `inbox-chief` and let the TLS certificate issue.
-3. Set these Vercel environment variables (Production **and** Preview) to the new host:
-   - `NEXT_PUBLIC_APP_URL=https://inboxchief.com`
-   - `CALL_IN_PUBLIC_BASE_URL=https://inboxchief.com`
-   - `GOOGLE_REDIRECT_URI=https://inboxchief.com/api/gmail/callback`
-4. In the Google client config, add the new redirect URI (see Step 3).
-5. Re-run `npm run vapi:setup-call-in` so the phone assistant speaks the new URL.
+Finish cutover before submitting verification:
 
-Everything below assumes `inboxchief.com`. Substitute your real domain.
+1. In the Vercel account that owns project `inbox-chief` → **Settings → Domains**,
+   add `inboxchief.email` and `www.inboxchief.email`. Set **Redirect** so
+   `www` → `inboxchief.email` (apex canonical).
+   Nameservers are already `ns1.vercel-dns.com` / `ns2.vercel-dns.com` (Name.com).
+   Until the domain is attached to this project, HTTP returns
+   `DEPLOYMENT_NOT_FOUND` and HTTPS has no certificate — that is expected.
+2. Wait until both domain cards show **Valid Configuration** and
+   `https://inboxchief.email/api/health` returns JSON.
+3. Set these Vercel environment variables (Production **and** Preview):
+   - `NEXT_PUBLIC_APP_URL=https://inboxchief.email`
+   - `CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email`
+   - `GOOGLE_REDIRECT_URI=https://inboxchief.email/api/gmail/callback`
+   - Also update `MICROSOFT_REDIRECT_URI` if Outlook connect is live:
+     `https://inboxchief.email/api/outlook/callback`
+4. In the Google client config, add the new redirect URI (see Step 3). Keep the
+   old `inbox-chief-kappa.vercel.app` redirect until cutover is verified.
+5. Update Stripe webhook URL to `https://inboxchief.email/api/billing/webhook`
+   (only once HTTPS is Valid; Stripe is not live yet).
+6. Update VAPI assistant **Server URL** to
+   `https://inboxchief.email/api/call-in/vapi/webhook`, then re-run
+   `npm run vapi:setup-call-in` so spoken prompts use the new host.
+
+**VAPI_WEBHOOK_SECRET:** do not invent or rotate this without Eddie confirming the
+value. If fail-closed webhook auth is about to deploy and the secret is not yet
+in both Vercel and the VAPI assistant `X-Vapi-Secret` header, set the secret in
+both places **before** that deploy — otherwise call-in goes offline (401).
 
 ---
 
@@ -46,7 +63,7 @@ Everything below assumes `inboxchief.com`. Substitute your real domain.
 
 1. Open https://search.google.com/search-console — sign in as `eddie@bannermanmenson.com`
    (must be the same account that is Owner/Editor on the Cloud project).
-2. **Add property** → choose **Domain** → enter `inboxchief.com`.
+2. **Add property** → choose **Domain** → enter `inboxchief.email`.
 3. Copy the TXT record Google shows, add it in your registrar's DNS, then click **Verify**.
 4. Wait until the property shows as verified. Verification failures here are the
    single most common cause of a rejected OAuth submission.
@@ -64,10 +81,10 @@ Enter exactly:
 | App name | `Inbox Chief` |
 | User support email | `eddie@bannermanmenson.com` |
 | App logo | Square PNG, 120×120 or larger, no transparency, matches the site branding |
-| Application home page | `https://inboxchief.com` |
-| Application privacy policy link | `https://inboxchief.com/privacy` |
-| Application terms of service link | `https://inboxchief.com/terms` |
-| Authorized domain | `inboxchief.com` |
+| Application home page | `https://inboxchief.email` |
+| Application privacy policy link | `https://inboxchief.email/privacy` |
+| Application terms of service link | `https://inboxchief.email/terms` |
+| Authorized domain | `inboxchief.email` |
 | Developer contact email | `eddie@bannermanmenson.com` |
 
 Notes:
@@ -87,14 +104,14 @@ Open https://console.cloud.google.com/auth/clients?project=gen-lang-client-01691
 Authorized redirect URIs must contain (keep the Vercel one until the domain cutover is done):
 
 ```
-https://inboxchief.com/api/gmail/callback
+https://inboxchief.email/api/gmail/callback
 https://inbox-chief-kappa.vercel.app/api/gmail/callback
 ```
 
 Authorized JavaScript origins:
 
 ```
-https://inboxchief.com
+https://inboxchief.email
 ```
 
 ---
@@ -189,7 +206,7 @@ not used for advertising or sold, and that humans do not read the data except
 with consent, for security, or when aggregated/anonymized.
 
 Action needed: nothing, except confirm the page loads on the new custom domain
-at `https://inboxchief.com/privacy` before submitting.
+at `https://inboxchief.email/privacy` before submitting.
 
 ---
 
@@ -206,7 +223,7 @@ the client ID visible.
 
 > "This is the Inbox Chief OAuth client, ID 515908681070-mmpjllceku64t31cdefhfpbt6tpdsvls, in project gen-lang-client-0169179372."
 
-**2. Show the homepage (15s).** Load `https://inboxchief.com` with the URL bar visible.
+**2. Show the homepage (15s).** Load `https://inboxchief.email` with the URL bar visible.
 
 > "Inbox Chief is an accessibility-first email assistant for blind and low-vision users. It reads email aloud over the phone and never sends anything without spoken approval."
 
@@ -296,7 +313,7 @@ Flipping it automatically:
 Verify after deploy:
 
 ```bash
-curl -s https://inboxchief.com/api/health | grep googleOauthPublished
+curl -s https://inboxchief.email/api/health | grep googleOauthPublished
 ```
 
 ---
@@ -309,7 +326,7 @@ Google's 100-test-user cap applies, which is far above the near-term target.
    the pending queue automatically — no data entry by you.
 2. Open https://console.cloud.google.com/auth/audience?project=gen-lang-client-0169179372
 3. **Add users** → paste the Gmail → **Save**.
-4. Open https://inbox-chief-kappa.vercel.app/dashboard/admin/onboard → in
+4. Open https://inboxchief.email/dashboard/admin/onboard → in
    **Pending voice signups**, use **Copy Gmail** to get the exact address, then
    check **Mark Gmail enabled**.
 5. The patron's SMS magic link (or spoken short code) now goes straight to Google

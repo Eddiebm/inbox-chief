@@ -10,7 +10,7 @@ export function gmailConnectedSpoken(email: string | null | undefined): string {
 
 /**
  * Render a URL so a caller can type it from speech alone.
- * "https://inboxchief.com/provision" -> "inboxchief dot com slash provision"
+ * "https://inboxchief.email/provision" -> "inboxchief dot email slash provision"
  */
 export function speakUrlForVoice(url: string): string {
   try {

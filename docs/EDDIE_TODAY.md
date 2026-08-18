@@ -60,7 +60,8 @@ Pre-filled in `secrets.local.env` / pushed by bootstrap script.
 
 ### 5. Google OAuth — test-user bridge (per patron)
 
-See **[GOOGLE_OAUTH_PUBLISH.md](./GOOGLE_OAUTH_PUBLISH.md)**. Add patron Gmail as test user until Google approves.
+See **[GOOGLE_OAUTH_PUBLISH.md](./GOOGLE_OAUTH_PUBLISH.md)** and the 10-click paste sheet
+**[EDDIE_GOOGLE.md](./EDDIE_GOOGLE.md)**. Add patron Gmail as test user until Google approves.
 
 ### 6. Stripe live billing
 

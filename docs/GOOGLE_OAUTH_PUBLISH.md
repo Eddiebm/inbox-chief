@@ -5,6 +5,13 @@ done from code. When it is finished, flipping **one** environment variable
 (`GOOGLE_OAUTH_PUBLISHED=true`) removes every "unverified app" instruction from
 the patron-facing app automatically. See [Step 9](#step-9--flip-the-flag).
 
+**Quick paste sheet (10 clicks, status, test-user bridge):** [EDDIE_GOOGLE.md](./EDDIE_GOOGLE.md)
+
+**Agent status (2026-08-18):** No Console changes from automation — login required.
+Live `/api/health` still reports `googleOauthPublished: false`. Search Console TXT
+for `inboxchief.email` not yet in DNS. Demo video not recorded → verification not
+submitted. Do **not** flip `GOOGLE_OAUTH_PUBLISHED=true` until Google approves.
+
 **Project facts you will need to paste:**
 
 | Field | Value |

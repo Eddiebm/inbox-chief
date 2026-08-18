@@ -7,6 +7,7 @@
 
 import {
   aggregateCallMinuteUsage,
+  clampMinutesForSpeech,
   emptyCallMinuteUsage,
   planForUsageKey,
   purchasedMinutesToDraw,
@@ -24,9 +25,12 @@ export type {
 export {
   aggregateCallMinuteUsage,
   buildPlainUsageSummary,
+  buildSpokenCallMinuteStatus,
   buildSpokenUsageSummary,
   buildSpokenUsageWarning,
+  clampMinutesForSpeech,
   emptyCallMinuteUsage,
+  isCallMinuteStatusQuestion,
   purchasedMinutesToDraw,
   warningLevelForUsage,
 } from "@/lib/billing/call-usage";
@@ -45,6 +49,8 @@ export async function loadCallMinuteUsageForOrg(
     !organizationId ||
     organizationId === "demo_org" ||
     organizationId === "unrecognized" ||
+    organizationId === "no_mailbox" ||
+    organizationId === "needs_reconnect" ||
     process.env.MOCK_INTEGRATIONS === "true" ||
     !process.env.DATABASE_URL
   ) {
@@ -103,7 +109,9 @@ export async function loadCallMinuteUsageForOrg(
     rows,
     periodStart,
     periodEnd,
-    purchasedMinutesRemaining: balance?.purchasedMinutesRemaining ?? 0,
+    purchasedMinutesRemaining: clampMinutesForSpeech(
+      balance?.purchasedMinutesRemaining ?? 0,
+    ),
   });
 }
 
@@ -246,7 +254,7 @@ export async function drawPurchasedMinutesForCall(input: {
   const balance = await prisma.callMinuteBalance.findUnique({
     where: { organizationId: input.organizationId },
   });
-  const current = balance?.purchasedMinutesRemaining ?? 0;
+  const current = clampMinutesForSpeech(balance?.purchasedMinutesRemaining ?? 0);
   const { draw, remainingBalance } = purchasedMinutesToDraw({
     callDurationMinutes: input.callDurationMinutes,
     periodMinutesUsedBeforeCall: input.periodMinutesUsedBeforeCall,

@@ -57,6 +57,12 @@ import {
   setCallInSpeechRateForUser,
 } from "@/lib/call-in/voice-preference";
 import { patchLiveCallSpeechRate } from "@/lib/call-in/vapi-live-call";
+import {
+  buildSpokenCallMinuteStatus,
+  isCallMinuteStatusQuestion,
+  shouldMeterCallInUsage,
+} from "@/lib/billing/call-usage";
+import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
 import { product } from "@/lib/product";
 import { queueAttachmentDelivery } from "@/lib/attachment-deliveries";
 import {
@@ -1418,6 +1424,30 @@ export async function handleCallInTool(input: {
         name,
       );
     }
+    if (
+      isCallMinuteStatusQuestion(question) &&
+      shouldMeterCallInUsage(input.snapshot)
+    ) {
+      try {
+        const usage = await loadCallMinuteUsageForOrg(
+          input.snapshot.organizationId,
+        );
+        return {
+          spoken: buildSpokenCallMinuteStatus(usage),
+          intent: "unknown",
+          toolName: name,
+          emailSent: false,
+        };
+      } catch {
+        return {
+          spoken:
+            "I can't check your call minutes right now. You can still ask me to read your emails or check connection status.",
+          intent: "unknown",
+          toolName: name,
+          emailSent: false,
+        };
+      }
+    }
     const answer = await answerCallInQuestionWithLlm({
       question,
       snapshot: input.snapshot,
@@ -1879,7 +1909,8 @@ export function buildCallInSystemPrompt(): string {
     "For calendar today, tomorrow, or next, call get_calendar and speak its result verbatim. If disconnected, tell them to use the optional Connect Calendar action in Settings. Never invent an event.",
     "For save this sender as Mom or call Jordan Lee Jordan, call save_contact_nickname. Never use a guessed contact.",
     "MINUTES EXHAUSTED: if a tool result says the caller has no call minutes left (included and purchased both used up), speak that result VERBATIM and stop. Do not read mail, compose, or start any new request. Do not invent a workaround, an emergency buffer, or a way to keep going. Valid choices are: buy more minutes in the Inbox Chief dashboard, upgrade the plan, or wait for the next period.",
-    "BILLING SPEECH: Never say wallet, balance, billing, or account credits on your own. Only speak minute-limit text when it appears verbatim in a tool result. When the caller asks to read mail, a briefing, or what needs attention, call the matching tool immediately — never lead with billing talk or skip reading because minutes might be low.",
+    "BILLING SPEECH: Never say wallet, balance, billing, account credits, or any minute counts on your own. Never speak a negative number of minutes. Only speak minute-limit text when a tool result itself contains a hard-stop no-minutes-left message. When the caller asks to read mail, a briefing, or what needs attention, call the matching tool immediately — never lead with billing talk, never guess remaining minutes, and never skip reading because minutes might be low.",
+    "MAILBOX RECONNECT: when a tool result says the mailbox needs reconnecting or Connect Gmail, speak only that reconnect guidance verbatim. Never mix reconnect speech with billing, wallet, or minute talk.",
     "Keep language plain. If only subject/from is available, say so and still read that metadata.",
     "When an unrecognized caller says sign up, create account, or get started: ask for their Gmail address, spell it back character by character, obtain explicit confirmation, then ask for an optional preferred name. Call provision_signup only after confirmation.",
     "Caller ID is the phone by default. If caller ID is unavailable, ask them to say or enter their cell number, including area code. Never ask for a phone when the tool already has caller ID.",

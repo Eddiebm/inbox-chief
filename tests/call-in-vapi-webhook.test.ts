@@ -259,6 +259,8 @@ describe("VAPI call-in webhook tool routing", () => {
     expect(prompt).toMatch(/never hallucinate content/i);
     expect(prompt).toMatch(/BILLING SPEECH/i);
     expect(prompt).toMatch(/Never say wallet/i);
+    expect(prompt).toMatch(/Never speak a negative number/i);
+    expect(prompt).toMatch(/MAILBOX RECONNECT/i);
     expect(prompt).not.toMatch(/still answer with available demo/i);
   });
 

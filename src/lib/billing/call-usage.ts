@@ -83,6 +83,12 @@ function roundMinutes(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+/** Never expose negative or NaN minute counts in speech or UI. */
+export function clampMinutesForSpeech(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return roundMinutes(Math.max(0, n));
+}
+
 function roundMinuteBalance(n: number): number {
   return Math.round(n * 10_000) / 10_000;
 }
@@ -92,7 +98,7 @@ function roundUsd(n: number): number {
 }
 
 function formatMinutesPlain(n: number): string {
-  const rounded = roundMinutes(n);
+  const rounded = clampMinutesForSpeech(n);
   if (rounded === 1) return "1 minute";
   if (Number.isInteger(rounded)) return `${rounded} minutes`;
   return `${rounded} minutes`;
@@ -220,6 +226,25 @@ export function isSoftCallUsageWarning(
   return level === "approaching" || level === "included_exhausted";
 }
 
+/** Org / mailbox states where call-in must not load or speak minute billing. */
+export function shouldMeterCallInUsage(input: {
+  organizationId: string;
+  connectionStatus?: string;
+}): boolean {
+  const org = input.organizationId;
+  if (
+    !org ||
+    org === "demo_org" ||
+    org === "unrecognized" ||
+    org === "no_mailbox" ||
+    org === "needs_reconnect"
+  ) {
+    return false;
+  }
+  if (input.connectionStatus === "error") return false;
+  return true;
+}
+
 export function buildSpokenUsageWarning(
   level: CallUsageWarningLevel,
   ctx: CallUsageMessageContext,
@@ -249,10 +274,10 @@ export function buildPlainUsageSummary(input: {
   hardCapReached: boolean;
   includedExhausted: boolean;
 }): string {
-  const used = roundMinutes(input.minutesUsed);
+  const used = clampMinutesForSpeech(input.minutesUsed);
   const included = input.minutesIncluded;
   const usedLabel = Number.isInteger(used) ? String(used) : used.toFixed(1);
-  const purchased = roundMinutes(input.purchasedMinutesRemaining);
+  const purchased = clampMinutesForSpeech(input.purchasedMinutesRemaining);
   const purchasedLabel = Number.isInteger(purchased)
     ? String(purchased)
     : purchased.toFixed(1);
@@ -282,10 +307,39 @@ export function buildSpokenUsageSummary(input: {
   );
   let base = `You have used ${used} of ${included} included this billing period.`;
   if (input.context.purchasedMinutesRemaining > 0) {
-    base += ` You also have ${purchased} of purchased minutes remaining.`;
+    base += ` You also have ${purchased} of purchased call minutes remaining.`;
   }
   const warn = buildSpokenUsageWarning(input.warningLevel, input.context);
   return warn ? `${base} ${warn}` : base;
+}
+
+/** Server-controlled minute status for call-in — never wallet/balance wording. */
+export function buildSpokenCallMinuteStatus(usage: CallMinuteUsage): string {
+  if (usage.hardCapReached) return usage.spokenCapReached;
+  const includedLeft = formatMinutesPlain(usage.minutesRemaining);
+  const purchased = clampMinutesForSpeech(usage.purchasedMinutesRemaining);
+  let spoken = `You have about ${includedLeft} of included call minutes left this period.`;
+  if (purchased > 0) {
+    spoken += ` You also have ${formatMinutesPlain(purchased)} of purchased call minutes available.`;
+  }
+  spoken += " Say read my emails whenever you want mail.";
+  return spoken;
+}
+
+/** Patron asked how many call minutes remain — answer from the server, not the LLM. */
+export function isCallMinuteStatusQuestion(question: string): boolean {
+  const q = question.toLowerCase().replace(/[^\w\s']/g, " ").replace(/\s+/g, " ").trim();
+  if (!q) return false;
+  if (/\b(read|briefing|email|mail|inbox|connect|calendar|draft|approval)\b/.test(q) && !/\b(minute|minutes|call minutes)\b/.test(q)) {
+    return false;
+  }
+  return (
+    /\b(how many|how much).{0,30}\b(minute|minutes|call minutes)\b/.test(q) ||
+    /\b(minute|minutes|call minutes).{0,20}\b(left|remaining|have|got)\b/.test(q) ||
+    /\b(wallet|balance|billing|credits)\b/.test(q) ||
+    /\bout of minutes\b/.test(q) ||
+    /\bany minutes left\b/.test(q)
+  );
 }
 
 /** Aggregate session rows into minute + cost usage for a plan + wallet. */
@@ -301,8 +355,8 @@ export function aggregateCallMinuteUsage(input: {
     input.plan.callLimits.includedCallMinutes ??
     getDefaultPlan().callLimits.includedCallMinutes ??
     90;
-  const purchasedMinutesRemaining = roundMinutes(
-    Math.max(0, input.purchasedMinutesRemaining ?? 0),
+  const purchasedMinutesRemaining = clampMinutesForSpeech(
+    input.purchasedMinutesRemaining ?? 0,
   );
 
   let seconds = 0;
@@ -321,10 +375,10 @@ export function aggregateCallMinuteUsage(input: {
     }
   }
 
-  const minutesUsed = roundMinutes(seconds / 60);
-  const overageMinutes = roundMinutes(Math.max(0, minutesUsed - included));
-  const minutesRemaining = roundMinutes(Math.max(0, included - minutesUsed));
-  const totalMinutesRemaining = roundMinutes(
+  const minutesUsed = clampMinutesForSpeech(seconds / 60);
+  const overageMinutes = clampMinutesForSpeech(minutesUsed - included);
+  const minutesRemaining = clampMinutesForSpeech(included - minutesUsed);
+  const totalMinutesRemaining = clampMinutesForSpeech(
     minutesRemaining + purchasedMinutesRemaining,
   );
   const percentUsed =
@@ -341,7 +395,7 @@ export function aggregateCallMinuteUsage(input: {
     minutesIncluded: included,
     planName: input.plan.name,
     resetDateLabel: formatResetDateLabel(input.periodEnd),
-    purchasedMinutesRemaining,
+    purchasedMinutesRemaining: clampMinutesForSpeech(purchasedMinutesRemaining),
   };
   const plainSummary = buildPlainUsageSummary({
     minutesUsed,

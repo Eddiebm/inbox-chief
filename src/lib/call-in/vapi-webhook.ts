@@ -14,7 +14,7 @@ import {
 } from "@/lib/call-in/speech-rate";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
 import {
-  isSoftCallUsageWarning,
+  shouldMeterCallInUsage,
   USAGE_UNAVAILABLE_SPOKEN,
 } from "@/lib/billing/call-usage";
 import {
@@ -115,14 +115,6 @@ export function extractCallerNumber(message: VapiWebhookMessage): string | null 
   return null;
 }
 
-/** Append minute warning after the current email — never cut speech mid-message. */
-export function appendMinuteWarning(spoken: string, warning: string | null | undefined): string {
-  const w = warning?.trim();
-  if (!w) return spoken;
-  if (spoken.includes(w)) return spoken;
-  return `${spoken} ${w}`;
-}
-
 export type VapiWebhookHandleResult =
   | { results: Array<{ toolCallId: string; result: string }> }
   | {
@@ -137,9 +129,8 @@ export type VapiWebhookHandleResult =
     };
 
 /**
- * Opening speech. Only the hard cap replaces the greeting — soft minute
- * warnings append after tool results so patrons still hear mail when minutes
- * remain.
+ * Opening speech. Only the hard cap replaces the greeting — never prepend soft
+ * minute warnings; billable tools fail closed only at a true hard cap.
  */
 async function openingWithUsageWarning(
   snapshot: Awaited<
@@ -149,8 +140,7 @@ async function openingWithUsageWarning(
   const base = openingPrompt(snapshot);
   if (
     isUnrecognizedCaller(snapshot) ||
-    snapshot.organizationId === "demo_org" ||
-    snapshot.organizationId === "unrecognized"
+    !shouldMeterCallInUsage(snapshot)
   ) {
     return base;
   }
@@ -159,7 +149,6 @@ async function openingWithUsageWarning(
     if (usage.hardCapReached) return usage.spokenCapReached;
     return base;
   } catch (err) {
-    // Keep the normal greeting; billable tools fail closed if usage cannot load.
     console.error("[call-in] minute usage load failed during opening", err);
     return base;
   }
@@ -194,23 +183,13 @@ export async function handleVapiCallInWebhook(
       }
     }
 
-    let usageWarning = "";
     let hardCap: { reached: boolean; spoken: string } | null = null;
-    if (
-      resolved.matched &&
-      resolved.snapshot.organizationId !== "demo_org" &&
-      resolved.snapshot.organizationId !== "unrecognized"
-    ) {
+    if (resolved.matched && shouldMeterCallInUsage(resolved.snapshot)) {
       try {
         const usage = await loadCallMinuteUsageForOrg(resolved.snapshot.organizationId);
         if (usage.hardCapReached) {
           // Hard stop: deny billable tools; speak the exhausted message.
           hardCap = { reached: true, spoken: usage.spokenCapReached };
-        } else if (
-          isSoftCallUsageWarning(usage.warningLevel) &&
-          usage.spokenWarning
-        ) {
-          usageWarning = usage.spokenWarning;
         }
       } catch (err) {
         // Fail closed. If the balance cannot be read we do not know whether
@@ -262,10 +241,7 @@ export async function handleVapiCallInWebhook(
         }
         results.push({
           toolCallId: parsed.id,
-          result: appendMinuteWarning(
-            handled.spoken.replace(/\n/g, " "),
-            usageWarning,
-          ),
+          result: handled.spoken.replace(/\n/g, " "),
         });
       } catch {
         results.push({
@@ -283,6 +259,9 @@ export async function handleVapiCallInWebhook(
     // Identity uses customer.number only — never customer.name / CNAM for speech.
     const resolved = await resolveSnapshotForCaller(callerPhone);
     let spoken = await openingWithUsageWarning(resolved.snapshot);
+    if (resolved.snapshot.connectionStatus === "error") {
+      spoken = resolved.snapshot.securityNote;
+    }
     const provisioning = await getProvisioningStatusForPhone(callerPhone);
     if (provisioning?.status === "needs_google_test_user") {
       spoken =

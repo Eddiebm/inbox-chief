@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateCallMinuteUsage,
   buildPlainUsageSummary,
+  buildSpokenCallMinuteStatus,
   buildSpokenCapReached,
   buildSpokenUsageWarning,
+  clampMinutesForSpeech,
   purchasedMinutesToDraw,
   warningLevelForUsage,
   type CallUsageMessageContext,
@@ -239,5 +241,30 @@ describe("call minute usage with purchased balance", () => {
     expect(spoken).toContain("September 1");
     expect(spoken.toLowerCase()).not.toContain("overage");
     expect(spoken.toLowerCase()).not.toContain("per minute");
+  });
+
+  it("never exposes negative minute counts in speech helpers", () => {
+    expect(clampMinutesForSpeech(-0.29)).toBe(0);
+    expect(clampMinutesForSpeech(60.8)).toBe(60.8);
+
+    const usage = aggregateCallMinuteUsage({
+      plan: getDefaultPlan(),
+      periodStart: new Date(2026, 7, 1),
+      periodEnd: new Date(2026, 8, 1),
+      purchasedMinutesRemaining: -0.29,
+      rows: [
+        {
+          durationSeconds: 29.2 * 60,
+          costUsd: 0.5,
+          startedAt: new Date(2026, 7, 12, 10, 0, 0),
+        },
+      ],
+    });
+    expect(usage.minutesRemaining).toBeGreaterThanOrEqual(0);
+    expect(usage.purchasedMinutesRemaining).toBe(0);
+    const spoken = buildSpokenCallMinuteStatus(usage);
+    expect(spoken.toLowerCase()).not.toMatch(/wallet|balance/);
+    expect(spoken).not.toMatch(/-\d/);
+    expect(spoken).toContain("included call minutes");
   });
 });

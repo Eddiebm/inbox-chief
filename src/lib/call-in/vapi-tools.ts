@@ -1955,12 +1955,7 @@ export function buildCallInAssistantPayload(
       ...(Object.keys(webhookHeaders).length ? { headers: webhookHeaders } : {}),
     },
     serverUrl: webhookUrl,
-    serverMessages: [
-      "assistant-request",
-      "tool-calls",
-      "end-of-call-report",
-      "status-update",
-    ],
+    serverMessages: ["tool-calls", "end-of-call-report", "status-update"],
     endCallFunctionEnabled: true,
     silenceTimeoutSeconds: 45,
     maxDurationSeconds: 1800,

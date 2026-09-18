@@ -3,6 +3,7 @@ import { getNodePrisma } from "@/lib/db-node";
 import { getGmailOAuthConfig } from "@/lib/gmail/config";
 import { GMAIL_SEND_SCOPE } from "@/lib/gmail/scopes";
 import { getDecryptedMailboxTokensForTenant } from "@/lib/gmail/tokens";
+import { hasMailboxPermission } from "@/lib/mailbox-permissions";
 import { writeAuditLog } from "@/lib/audit";
 import {
   parseMailboxAddress,
@@ -149,6 +150,20 @@ export async function sendApprovedDraft(
   },
 ): Promise<{ recipient: string; subject: string; gmailMessageId: string }> {
   const prisma = getNodePrisma();
+
+  // Resolved once, up front, so both the approve step below and the final
+  // send step can check delegated permission against the real owner —
+  // never trust a caller-supplied ownerId.
+  const mailbox = await prisma.mailbox.findFirst({
+    where: {
+      id: input.mailboxId,
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+    },
+    select: { emailAddress: true, ownerId: true },
+  });
+  if (!mailbox) throw new Error("mailbox_not_found");
+
   let draft = await prisma.draft.findFirst({
     where: {
       id: input.draftId,
@@ -163,6 +178,15 @@ export async function sendApprovedDraft(
     input.confirmed === true &&
     draft.status === "AWAITING_APPROVAL"
   ) {
+    const canApprove = await hasMailboxPermission({
+      organizationId: input.organizationId,
+      workspaceId: input.workspaceId,
+      mailboxId: input.mailboxId,
+      userId: input.userId,
+      ownerId: mailbox.ownerId,
+      permission: "approve_messages",
+    });
+    if (!canApprove) throw new Error("permission_denied");
     const approved = await prisma.draft.updateMany({
       where: {
         id: draft.id,
@@ -178,16 +202,19 @@ export async function sendApprovedDraft(
   }
   assertConfirmedSend({ status: draft.status, confirmed: input.confirmed });
 
-  const mailbox = await prisma.mailbox.findFirst({
-    where: {
-      id: input.mailboxId,
-      organizationId: input.organizationId,
-      workspaceId: input.workspaceId,
-      ownerId: input.userId,
-    },
-    select: { emailAddress: true },
+  // The final send confirmation is the "send_approved_messages" permission.
+  // The mailbox owner always has it implicitly; a delegate (e.g. an
+  // Executive Assistant) needs a live MailboxPermission grant for it.
+  const canSend = await hasMailboxPermission({
+    organizationId: input.organizationId,
+    workspaceId: input.workspaceId,
+    mailboxId: input.mailboxId,
+    userId: input.userId,
+    ownerId: mailbox.ownerId,
+    permission: "send_approved_messages",
   });
-  if (!mailbox) throw new Error("mailbox_not_found");
+  if (!canSend) throw new Error("permission_denied");
+
   const tokens = await getDecryptedMailboxTokensForTenant(input);
   if (!tokens || !tokens.scopes.includes(GMAIL_SEND_SCOPE)) {
     throw new Error("gmail_send_scope_required");

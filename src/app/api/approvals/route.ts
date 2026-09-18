@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getNodePrisma } from "@/lib/db-node";
 import { resolveUserGmailScope } from "@/lib/gmail/tenant-context";
 import { sendApprovedDraft } from "@/lib/email-send";
+import { hasMailboxPermission } from "@/lib/mailbox-permissions";
 import { writeAuditLog } from "@/lib/audit";
 
 const decisionSchema = z.object({
@@ -17,18 +18,40 @@ async function context() {
   const scope = await resolveUserGmailScope(user.id);
   if (!scope) return null;
   const prisma = getNodePrisma();
+  // The mailbox owner always qualifies. A non-owner qualifies only when they
+  // hold a live (non-expired) MailboxPermission grant on that exact mailbox
+  // for one of the approval-related permissions — this is what lets a
+  // delegate (e.g. an Executive Assistant) see and act on the queue without
+  // widening access to every mailbox in the tenant.
   const mailbox = await prisma.mailbox.findFirst({
     where: {
       organizationId: scope.organizationId,
       workspaceId: scope.workspaceId,
-      ownerId: user.id,
       provider: "gmail",
+      OR: [
+        { ownerId: user.id },
+        {
+          permissions: {
+            some: {
+              userId: user.id,
+              permission: { key: { in: ["approve_messages", "send_approved_messages"] } },
+              OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+            },
+          },
+        },
+      ],
     },
     orderBy: { updatedAt: "desc" },
-    select: { id: true },
+    select: { id: true, ownerId: true },
   });
   if (!mailbox) return null;
-  return { user, prisma, scope: { ...scope, mailboxId: mailbox.id } };
+  return {
+    user,
+    prisma,
+    scope: { ...scope, mailboxId: mailbox.id },
+    isOwner: mailbox.ownerId === user.id,
+    ownerId: mailbox.ownerId,
+  };
 }
 
 export async function GET() {
@@ -74,6 +97,22 @@ export async function PATCH(request: Request) {
       );
     }
   }
+  // Approving or rejecting a draft is the "approve_messages" permission —
+  // the owner always has it implicitly; anyone else needs a live grant.
+  const canApprove =
+    ctx.isOwner ||
+    (await hasMailboxPermission({
+      organizationId: ctx.scope.organizationId,
+      workspaceId: ctx.scope.workspaceId,
+      mailboxId: ctx.scope.mailboxId,
+      userId: ctx.user.id,
+      ownerId: ctx.ownerId,
+      permission: "approve_messages",
+    }));
+  if (!canApprove) {
+    return NextResponse.json({ ok: false, message: "permission_denied" }, { status: 403 });
+  }
+
   const status = parsed.data.action === "approve" ? "APPROVED" : "REJECTED";
   const updated = await ctx.prisma.draft.updateMany({
     where: {

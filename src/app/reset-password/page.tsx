@@ -6,7 +6,7 @@ import { ResetPasswordForm } from "@/components/reset-password-form";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Reset password · ${product.name}`,
+  title: "Reset password",
   description: `Set a new ${product.name} password from a reset link.`,
 };
 

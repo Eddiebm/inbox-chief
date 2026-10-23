@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Terms of Service — ${product.name}`,
+  title: "Terms of Service",
   description: `The terms that govern your use of ${product.name}.`,
 };
 

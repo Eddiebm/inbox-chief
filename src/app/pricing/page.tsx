@@ -4,10 +4,9 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { formatPlanPrice, plans } from "@/lib/plans";
 import { product } from "@/lib/product";
-import "../landing.css";
 
 export const metadata: Metadata = {
-  title: `Pricing — ${product.name}`,
+  title: "Pricing",
   description: `${product.name} Patron and Pro plans with included call-in minutes plus prepaid minute packs — never unlimited, never surprise overage.`,
 };
 

@@ -5,7 +5,7 @@ import { resolveUserMailboxScope } from "@/lib/mail/tenant-context";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Downloads · ${product.name}`,
+  title: "Downloads",
 };
 
 export default async function DownloadsPage() {

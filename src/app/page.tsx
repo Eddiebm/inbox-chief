@@ -5,7 +5,6 @@ import { ReadItYourWay } from "@/components/landing/read-it-your-way";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { product } from "@/lib/product";
-import "./landing.css";
 
 export const metadata: Metadata = {
   title: {

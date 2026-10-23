@@ -3,7 +3,7 @@ import { ApprovalsPanel } from "@/components/approvals/approvals-panel";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Approvals · ${product.name}`,
+  title: "Approvals",
 };
 
 export default function ApprovalsPage() {

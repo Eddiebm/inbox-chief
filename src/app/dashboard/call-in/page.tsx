@@ -9,7 +9,7 @@ import { OperatorHealthBanner } from "@/components/admin/operator-health-banner"
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Call in · ${product.name}`,
+  title: "Call in",
   description: `Call or speak to ${product.name} anytime for mail status.`,
 };
 

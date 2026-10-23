@@ -1,4 +1,5 @@
-/* Marketing pages. Tokens are scoped to .lp so the dashboard keeps its own palette. */
+/* Site-wide design tokens (loaded after globals.css) plus marketing-page styles. */
+:root,
 .lp {
   --background: #f3f4fb;
   --foreground: #0b0f2a;
@@ -16,7 +17,9 @@
   --radius: 14px;
   --lp-max: 74rem;
   --lp-gutter: 1.25rem;
+}
 
+.lp {
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -25,6 +28,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  :root,
   .lp {
     --background: #090d24;
     --foreground: #eef0ff;
@@ -40,6 +44,7 @@
   }
 }
 
+:focus-visible,
 .lp :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -47,10 +52,6 @@
 
 .lp .site-header {
   background: color-mix(in srgb, var(--background) 90%, transparent);
-}
-
-.lp .site-footer {
-  background: var(--surface);
 }
 
 .lp main {
@@ -716,4 +717,128 @@
   .lp .site-header__inner {
     gap: 0.35rem 0.75rem;
   }
+}
+
+/* Site-wide polish: inner pages, auth, legal, footer */
+body {
+  background: var(--background);
+}
+
+.page-header h1 {
+  font-size: clamp(2.25rem, 5vw, 3.5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+}
+
+.page-header p {
+  font-size: 1.2rem;
+  line-height: 1.55;
+}
+
+.auth-main,
+.auth-page {
+  display: grid;
+  flex: 1;
+  place-items: start center;
+  padding: 4rem var(--lp-gutter) 5rem;
+}
+
+.auth-form,
+.auth-card {
+  display: grid;
+  gap: 1.1rem;
+  width: min(100%, 30rem);
+  padding: 2rem;
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0.6rem 0.6rem 0 var(--accent);
+}
+
+.auth-form h1,
+.auth-card h1 {
+  margin: 0;
+  font-size: clamp(1.9rem, 4vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+
+.auth-form p,
+.auth-card p {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.auth-form label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 700;
+}
+
+.auth-form input,
+.auth-card input {
+  width: 100%;
+  min-height: 3.25rem;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 400;
+}
+
+.form-error {
+  padding: 0.75rem 1rem;
+  border-left: 5px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  font-weight: 700;
+}
+
+.auth-form a,
+.auth-card a,
+.signup-alt a,
+.legal-prose a {
+  color: var(--accent);
+  font-weight: 700;
+  text-underline-offset: 3px;
+}
+
+.legal-prose {
+  font-size: 1.1rem;
+  line-height: 1.65;
+}
+
+.legal-prose h2 {
+  margin-top: 2.5rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.site-footer {
+  border-top: 0;
+  background: var(--ink);
+  color: #fff;
+}
+
+.site-footer__link {
+  color: #fff;
+}
+
+.site-footer :focus-visible {
+  outline-color: var(--signal);
+}
+
+.onboarding-product-name {
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+html[data-contrast="high"] {
+  --accent: #0a0fa0;
+  --accent-soft: #e6e8ff;
 }

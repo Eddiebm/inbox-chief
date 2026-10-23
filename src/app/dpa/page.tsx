@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Data Processing Agreement — ${product.name}`,
+  title: "Data Processing Agreement",
   description: `DPA placeholder for ${product.name}.`,
 };
 

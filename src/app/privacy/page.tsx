@@ -4,7 +4,7 @@ import { SiteHeader } from "@/components/site-header";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Privacy Policy — ${product.name}`,
+  title: "Privacy Policy",
   description: `How ${product.name} collects, uses, stores, and protects your data, including Google user data.`,
 };
 

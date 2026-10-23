@@ -1,19 +1,19 @@
 /* Site-wide design tokens (loaded after globals.css) plus marketing-page styles. */
 :root,
 .lp {
-  --background: #f3f4fb;
-  --foreground: #0b0f2a;
+  --background: #f4f6f3;
+  --foreground: #10201b;
   --surface: #ffffff;
-  --surface-muted: #e8eaf7;
-  --border: #0b0f2a;
-  --border-subtle: #b8bdd8;
-  --accent: #2433d6;
+  --surface-muted: #e7ece8;
+  --border: #10201b;
+  --border-subtle: #bcc8c1;
+  --accent: #1f5c4d;
   --accent-contrast: #ffffff;
-  --accent-soft: #e3e6fd;
-  --signal: #ffd60a;
-  --ink: #0b0f2a;
-  --ok: #0a6b3a;
-  --focus: #0b0f2a;
+  --accent-soft: #dcebe4;
+  --signal: #f2cf5b;
+  --ink: #10201b;
+  --ok: #1a6b3a;
+  --focus: #10201b;
   --radius: 14px;
   --lp-max: 74rem;
   --lp-gutter: 1.25rem;
@@ -30,16 +30,16 @@
 @media (prefers-color-scheme: dark) {
   :root,
   .lp {
-    --background: #090d24;
-    --foreground: #eef0ff;
-    --surface: #121838;
-    --surface-muted: #1a2150;
-    --border: #cdd2f7;
-    --border-subtle: #363e7a;
-    --accent: #96a2ff;
-    --accent-contrast: #090d24;
-    --accent-soft: #1c2356;
-    --focus: #ffd60a;
+    --background: #0b1411;
+    --foreground: #ebf3ef;
+    --surface: #131f1b;
+    --surface-muted: #1b2a25;
+    --border: #cfe0d8;
+    --border-subtle: #34493f;
+    --accent: #86d4bb;
+    --accent-contrast: #08150f;
+    --accent-soft: #19332a;
+    --focus: #f2cf5b;
     --ok: #6fe0a2;
   }
 }
@@ -542,7 +542,7 @@
 .lp-table th,
 .lp-table td {
   padding: 1.1rem 1.25rem;
-  border-bottom: 2px solid #3a4180;
+  border-bottom: 2px solid #34493f;
 }
 
 .lp-table tbody tr:last-child > * {
@@ -550,7 +550,7 @@
 }
 
 .lp-table thead th {
-  background: #171d4a;
+  background: #18271f;
   font-size: 1rem;
 }
 
@@ -700,7 +700,7 @@
 }
 
 .lp .pricing-card--featured .pricing-card__features li {
-  border-top-color: #3a4180;
+  border-top-color: #34493f;
 }
 
 .lp .pricing-card--featured .btn--primary {
@@ -839,6 +839,6 @@ body {
 }
 
 html[data-contrast="high"] {
-  --accent: #0a0fa0;
-  --accent-soft: #e6e8ff;
+  --accent: #0b4a3b;
+  --accent-soft: #e0f0e9;
 }

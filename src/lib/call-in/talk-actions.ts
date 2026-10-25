@@ -1,7 +1,7 @@
 import { readIntentFromQuestion } from "@/lib/call-in/vapi-tools";
 import { detectSpeechRateCommand } from "@/lib/call-in/speech-rate";
 import { isBuyMinutesRequest } from "@/lib/billing/voice-minute-purchase";
-import { talkCommand } from "@/lib/voice/talk-commands";
+import { talkCommand, talkSendDecision } from "@/lib/voice/talk-commands";
 
 export type TalkCalendarRange = "today" | "tomorrow" | "next";
 
@@ -78,11 +78,18 @@ export function parseTalkAction(text: string): TalkAction | null {
 
   if (/^(?:please )?email (?:this to )?me$/.test(phrase)) return null;
 
-  if (/^(?:approve|send it|send this|yes,? send(?: it)?)$/.test(phrase)) {
-    return { kind: "confirm_send" };
-  }
-  if (/^(?:no|no thanks|do not send|don't send|change it|cancel that)$/.test(phrase)) {
-    return { kind: "decline_send" };
+  const decision = talkSendDecision(original);
+  switch (decision) {
+    case "confirm_send":
+      return { kind: "confirm_send" };
+    case "decline_send":
+      return { kind: "decline_send" };
+    case null:
+      break;
+    default: {
+      const neverDecision: never = decision;
+      return neverDecision;
+    }
   }
 
   const reply = original.match(REPLY);
@@ -129,6 +136,7 @@ export function phoneToolForUtterance(text: string): TalkPhoneTool | null {
   if (
     /^\s*research\b/i.test(original) ||
     /\bfind original papers\b/i.test(phrase) ||
+    /\bfind papers\b/i.test(phrase) ||
     /\bexplain the evidence\b/i.test(phrase) ||
     /^(?:please )?email (?:this to )?me$/.test(phrase)
   ) {

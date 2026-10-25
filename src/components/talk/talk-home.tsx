@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { talkCommand, talkInterrupt } from "@/lib/voice/talk-commands";
+import { preferTalkHearing, talkCommand, talkInterrupt } from "@/lib/voice/talk-commands";
 import {
   isSpeechRecognitionSupported,
   isSpeechSynthesisSupported,
@@ -131,6 +131,7 @@ export function TalkHome() {
     let timer: number | null = null;
     let staged = "";
     const stop = listenForLatestPiece({
+      preferTranscript: preferTalkHearing,
       onPiece: (piece) => {
         const command = talkInterrupt(piece, spokenText, charIndexRef.current);
         if (!command) {
@@ -280,6 +281,7 @@ export function TalkHome() {
       const text = await listenUntilSilence({
         endOfTurnMs: END_OF_TURN_MS,
         thinkingPauseMs: THINKING_PAUSE_MS,
+        preferTranscript: preferTalkHearing,
       });
       if (turn !== turnRef.current) return;
       listeningRef.current = false;

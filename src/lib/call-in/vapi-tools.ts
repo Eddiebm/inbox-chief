@@ -69,6 +69,7 @@ import {
   startVoiceMinutePackPurchase,
 } from "@/lib/billing/voice-minute-purchase";
 import { speakResearchForOwner } from "@/lib/research/from-voice";
+import { talkCommand } from "@/lib/voice/talk-commands";
 import { product } from "@/lib/product";
 import { queueAttachmentDelivery } from "@/lib/attachment-deliveries";
 import {
@@ -952,17 +953,26 @@ export function readIntentFromQuestion(
   if (/\b(next|another one|another email|go on)\b/.test(q)) {
     return { position: "next", question };
   }
-  if (
-    /^(?:please )?(?:repeat|repeat that|say that again|again|read it again|read that again)$/.test(
-      q,
-    )
-  ) {
-    return { position: "repeat", question };
-  }
-  if (
-    /^(?:please )?(?:previous(?: email| message| one)?|go back|back up)$/.test(q)
-  ) {
-    return { position: "previous", question };
+  const loose = talkCommand(question);
+  switch (loose) {
+    case "next":
+      return { position: "next", question };
+    case "previous":
+      return { position: "previous", question };
+    case "repeat":
+      return { position: "repeat", question };
+    case "continue":
+      return { position: "continue", question };
+    case "stop":
+    case "slower":
+    case "faster":
+    case "normal":
+    case null:
+      break;
+    default: {
+      const neverLoose: never = loose;
+      return neverLoose;
+    }
   }
   if (/\b(start over|from the beginning|first email|read them again)\b/.test(q)) {
     return { position: "first", question };

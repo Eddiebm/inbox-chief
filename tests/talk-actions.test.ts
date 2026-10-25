@@ -95,8 +95,19 @@ describe("parseTalkAction", () => {
       replyToCurrent: false,
     });
     expect(parseTalkAction("Send it.")).toEqual({ kind: "confirm_send" });
+    expect(parseTalkAction("please send it")).toEqual({ kind: "confirm_send" });
+    expect(parseTalkAction("yes, send it")).toEqual({ kind: "confirm_send" });
+    expect(parseTalkAction("don't send")).toEqual({ kind: "decline_send" });
+    expect(parseTalkAction("do not send it")).toEqual({ kind: "decline_send" });
     expect(parseTalkAction("Yes")).toBeNull();
+    expect(parseTalkAction("yeah")).toBeNull();
+    expect(parseTalkAction("yes please")).toBeNull();
+    expect(parseTalkAction("next")).toBeNull();
+    expect(parseTalkAction("go next")).toBeNull();
+    expect(parseTalkAction("the next email")).toBeNull();
     expect(parseTalkAction("Read my emails")).toBeNull();
+    expect(parseTalkAction("find papers")).toBeNull();
+    expect(parseTalkAction("email this to me")).toBeNull();
   });
 
   it("finds the confirmation code in a read-back", () => {
@@ -125,6 +136,7 @@ describe("phoneToolForUtterance", () => {
 
   it("does not steal a research request", () => {
     expect(phoneToolForUtterance("Find original papers on retinal repair")).toBeNull();
+    expect(phoneToolForUtterance("find papers on retinal repair")).toBeNull();
     expect(phoneToolForUtterance("Email this to me")).toBeNull();
   });
 
@@ -165,6 +177,52 @@ describe("phoneToolForUtterance", () => {
     expect(phoneToolForUtterance("Read the next email")).toMatchObject({
       name: "read_emails",
       args: { position: "next" },
+    });
+    expect(phoneToolForUtterance("go next")).toEqual({
+      name: "read_emails",
+      args: { position: "next", question: "go next" },
+    });
+    expect(phoneToolForUtterance("the next email")).toEqual({
+      name: "read_emails",
+      args: { position: "next", question: "the next email" },
+    });
+    expect(phoneToolForUtterance("next message")).toEqual({
+      name: "read_emails",
+      args: { position: "next", question: "next message" },
+    });
+    expect(phoneToolForUtterance("next one")).toEqual({
+      name: "read_emails",
+      args: { position: "next", question: "next one" },
+    });
+    expect(phoneToolForUtterance("previous one")).toEqual({
+      name: "read_emails",
+      args: { position: "previous", question: "previous one" },
+    });
+    expect(phoneToolForUtterance("read it again")).toEqual({
+      name: "read_emails",
+      args: { position: "repeat", question: "read it again" },
+    });
+    expect(phoneToolForUtterance("say that again")).toEqual({
+      name: "read_emails",
+      args: { position: "repeat", question: "say that again" },
+    });
+    expect(phoneToolForUtterance("slow down")).toEqual({
+      name: "set_speech_speed",
+      args: { command: "slower", question: "slow down" },
+    });
+    expect(phoneToolForUtterance("speed up")).toEqual({
+      name: "set_speech_speed",
+      args: { command: "faster", question: "speed up" },
+    });
+    expect(phoneToolForUtterance("stop reading this one")).toEqual({
+      name: "read_emails",
+      args: { position: "skip", question: "stop reading this one" },
+    });
+    expect(phoneToolForUtterance("send it")).toBeNull();
+    expect(phoneToolForUtterance("don't send")).toBeNull();
+    expect(phoneToolForUtterance("yes")).toEqual({
+      name: "ask_inbox",
+      args: { question: "yes" },
     });
   });
 });

@@ -25,10 +25,41 @@ export type ListenOptions = {
   onUnsupported?: () => void;
 };
 
+type SpeechRecognitionAlternativeLike = {
+  readonly transcript: string;
+  readonly confidence?: number;
+};
+
 type SpeechRecognitionResultLike = {
   readonly isFinal: boolean;
-  readonly 0: { readonly transcript: string };
+  readonly length?: number;
+  readonly [index: number]: SpeechRecognitionAlternativeLike | undefined;
 };
+
+export type HeardAlternative = {
+  transcript: string;
+  confidence: number;
+};
+
+function alternativesOf(
+  result: SpeechRecognitionResultLike | undefined,
+): HeardAlternative[] {
+  if (!result) return [];
+  const count =
+    typeof result.length === "number" && result.length > 0 ? result.length : 1;
+  const heard: HeardAlternative[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const alternative = result[index];
+    const transcript = alternative?.transcript?.trim() ?? "";
+    if (!transcript) continue;
+    const confidence =
+      typeof alternative?.confidence === "number" && Number.isFinite(alternative.confidence)
+        ? alternative.confidence
+        : 0;
+    heard.push({ transcript, confidence });
+  }
+  return heard;
+}
 
 type SpeechRecognitionEventLike = {
   readonly resultIndex: number;
@@ -190,6 +221,8 @@ export function stopListening(): void {
  */
 export function listenForLatestPiece(options: {
   onPiece: (piece: string) => void;
+  /** Talk only. Research listening leaves this unset. */
+  preferTranscript?: (alternatives: readonly HeardAlternative[]) => string | null;
 }): () => void {
   const Recognition = getSpeechRecognitionConstructor();
   if (!Recognition) return () => undefined;
@@ -204,10 +237,11 @@ export function listenForLatestPiece(options: {
     recognition.lang = "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = options.preferTranscript ? 5 : 1;
     recognition.onresult = (event) => {
       const latest = event.results[event.results.length - 1];
-      const piece = latest?.[0]?.transcript?.trim() ?? "";
+      const preferred = options.preferTranscript?.(alternativesOf(latest));
+      const piece = (preferred ?? latest?.[0]?.transcript ?? "").trim();
       if (piece) options.onPiece(piece);
     };
     recognition.onerror = (event) => {
@@ -351,6 +385,8 @@ export function listenUntilSilence(options: {
   thinkingPauseMs: number;
   onInterim?: (transcript: string) => void;
   onStart?: () => void;
+  /** Talk only. Research listening leaves this unset. */
+  preferTranscript?: (alternatives: readonly HeardAlternative[]) => string | null;
 }): Promise<string> {
   const Recognition = getSpeechRecognitionConstructor();
   if (!Recognition) {
@@ -362,7 +398,7 @@ export function listenUntilSilence(options: {
     recognition.lang = options.lang ?? "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    recognition.maxAlternatives = options.preferTranscript ? 5 : 1;
     let settled = false;
     let heard = "";
     let silenceTimer: number | null = null;
@@ -400,7 +436,18 @@ export function listenUntilSilence(options: {
     recognition.onresult = (event) => {
       let next = "";
       for (let i = 0; i < event.results.length; i += 1) {
-        next += event.results[i]?.[0]?.transcript ?? "";
+        const result = event.results[i];
+        if (options.preferTranscript) {
+          const piece = (
+            options.preferTranscript(alternativesOf(result)) ??
+            result?.[0]?.transcript ??
+            ""
+          ).trim();
+          if (!piece) continue;
+          next = next ? `${next} ${piece}` : piece;
+        } else {
+          next += result?.[0]?.transcript ?? "";
+        }
       }
       heard = next;
       if (heard.trim()) {

@@ -18,24 +18,45 @@ export default function SignupPage() {
       </a>
       <SiteHeader />
       <main id="main" className="page signup-page">
-        <header className="page-header">
-          <h1>Create your account</h1>
-          <p>
-            Secure signup for {product.name}. After you register, continue to
-            accessible voice onboarding.
-          </p>
-        </header>
+        <div className="signup-grid">
+          <div>
+            <header className="page-header">
+              <h1>Create your account</h1>
+              <p>
+                Secure signup for {product.name}. After you register, continue
+                to accessible voice onboarding.
+              </p>
+            </header>
 
-        <div className="signup-shell">
-          <SignupForm />
-          <p className="signup-alt">
-            Already have an account?{" "}
-            <Link href="/login">Sign in</Link>
-          </p>
-          <p className="signup-alt">
-            Prefer to explore setup first?{" "}
-            <Link href="/onboarding">Go to onboarding</Link>
-          </p>
+            <div className="signup-shell">
+              <SignupForm />
+              <p className="signup-alt">
+                Already have an account? <Link href="/login">Sign in</Link>
+              </p>
+              <p className="signup-alt">
+                Prefer to explore setup first?{" "}
+                <Link href="/onboarding">Go to onboarding</Link>
+              </p>
+            </div>
+          </div>
+
+          <aside className="signup-aside" aria-labelledby="signup-next-heading">
+            <h2 id="signup-next-heading">What happens next</h2>
+            <ol>
+              <li>
+                <strong>Create your account.</strong> Your name, email and a
+                password.
+              </li>
+              <li>
+                <strong>Set up at your pace.</strong> Voice-guided onboarding,
+                or the keyboard if you prefer.
+              </li>
+              <li>
+                <strong>Connect Gmail.</strong> Your assistant starts drafting.
+              </li>
+            </ol>
+            <p>Nothing is ever sent without your approval.</p>
+          </aside>
         </div>
       </main>
       <SiteFooter />

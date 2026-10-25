@@ -842,3 +842,75 @@ html[data-contrast="high"] {
   --accent: #0b4a3b;
   --accent-soft: #e0f0e9;
 }
+
+/* Signup */
+.signup-grid {
+  display: grid;
+  gap: 3rem;
+  align-items: start;
+}
+
+@media (min-width: 60rem) {
+  .signup-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    gap: 5rem;
+  }
+}
+
+.signup-aside {
+  padding: 2rem;
+  border-radius: var(--radius);
+  background: var(--ink);
+  color: #fff;
+}
+
+.signup-aside h2 {
+  margin: 0 0 1.25rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.signup-aside ol {
+  display: grid;
+  gap: 1.1rem;
+  margin: 0;
+  padding-left: 1.4rem;
+  list-style: decimal;
+  font-size: 1.1rem;
+  line-height: 1.5;
+}
+
+.signup-aside li::marker {
+  color: var(--signal);
+  font-weight: 700;
+}
+
+.signup-aside p {
+  margin: 1.75rem 0 0;
+  padding-top: 1.25rem;
+  border-top: 2px solid #34493f;
+  font-weight: 700;
+}
+
+.signup-form {
+  box-shadow: 0.6rem 0.6rem 0 var(--accent);
+}
+
+/* Onboarding */
+.onboarding-step {
+  box-shadow: 0.6rem 0.6rem 0 var(--accent);
+}
+
+.onboarding-shell {
+  padding-top: 2.5rem;
+}
+
+.onboarding-heading {
+  font-size: clamp(1.7rem, 4vw, 2.25rem);
+  letter-spacing: -0.03em;
+}
+
+.onboarding-progress-fill {
+  background: var(--accent);
+}

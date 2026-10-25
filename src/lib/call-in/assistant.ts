@@ -164,6 +164,13 @@ export function mailboxNotConnectedSnapshot(
   };
 }
 
+export type MailboxReconnectContext = {
+  organizationId: string;
+  workspaceId: string;
+  mailboxId: string;
+  matchedPhoneE164?: string | null;
+};
+
 /**
  * Matched patron whose Gmail token no longer works (client switch / revoked).
  * Never read stale synced mail — send them back to Connect Gmail.
@@ -171,13 +178,14 @@ export function mailboxNotConnectedSnapshot(
 export function mailboxNeedsReconnectSnapshot(
   preferredName = "there",
   mailboxEmail = "your mailbox",
+  tenant?: MailboxReconnectContext,
 ): CallInMailboxSnapshot {
   const spoken =
     "Your mailbox needs reconnecting. Open Settings and tap Connect Gmail, then try again. Nothing sends without your approval.";
   return {
-    organizationId: "needs_reconnect",
-    workspaceId: "needs_reconnect",
-    mailboxId: "needs_reconnect",
+    organizationId: tenant?.organizationId ?? "needs_reconnect",
+    workspaceId: tenant?.workspaceId ?? "needs_reconnect",
+    mailboxId: tenant?.mailboxId ?? "needs_reconnect",
     ownerFirstName: preferredName,
     mailboxEmail,
     connectionStatus: "error",
@@ -193,7 +201,7 @@ export function mailboxNeedsReconnectSnapshot(
     readableEmailsNonPrimary: [],
     skippedNonPrimaryCount: 0,
     securityNote: spoken,
-    matchedPhoneE164: null,
+    matchedPhoneE164: tenant?.matchedPhoneE164 ?? null,
   };
 }
 
@@ -1071,7 +1079,7 @@ export function answerCallInQuestion(
   ) {
     return {
       intent: "help",
-      spoken: `You can ask me anytime: read my emails; give me a briefing; what needs attention; any drafts; approvals waiting; follow-ups; deadlines; or is my email connected. I read each message aloud in full — from, subject, when it arrived, the whole text, then any attachments I can read. If a message is long I read part of it and tell you what is left: say continue for the rest, or say next at any time to skip it. I will never send mail from this call without a separate explicit approval.`,
+      spoken: `You can ask me anytime: read my emails; give me a briefing; what needs attention; any drafts; approvals waiting; follow-ups; deadlines; what is on my calendar today; or is my email connected. Say email someone about a topic, and I will read the draft back. Say send it only when that draft is the one you want. I read each message aloud in full — from, subject, when it arrived, the whole text, then any attachments I can read. If a message is long I read part of it and tell you what is left: say continue for the rest, or say next at any time to skip it. I will never send mail without a separate explicit approval.`,
     };
   }
 

@@ -63,6 +63,12 @@ import {
   shouldMeterCallInUsage,
 } from "@/lib/billing/call-usage";
 import { loadCallMinuteUsageForOrg } from "@/lib/billing/call-usage-server";
+import {
+  isBuyMinutesRequest,
+  parseMinutePackFromArgs,
+  startVoiceMinutePackPurchase,
+} from "@/lib/billing/voice-minute-purchase";
+import { speakResearchForOwner } from "@/lib/research/from-voice";
 import { product } from "@/lib/product";
 import { queueAttachmentDelivery } from "@/lib/attachment-deliveries";
 import {
@@ -110,6 +116,7 @@ export const VAPI_CALL_IN_TOOL_NAMES = [
   "get_calendar",
   "save_contact_nickname",
   "set_speech_speed",
+  "buy_minutes",
 ] as const;
 
 export type VapiCallInToolName = (typeof VAPI_CALL_IN_TOOL_NAMES)[number];
@@ -135,6 +142,7 @@ const TOOL_TO_QUESTION: Record<
     | "get_calendar"
     | "save_contact_nickname"
     | "set_speech_speed"
+    | "buy_minutes"
   >,
   string
 > = {
@@ -174,9 +182,12 @@ export type VapiToolHandlerResult = {
     | "calendar"
     | "contact"
     | "speech_rate"
-    | "minute_cap";
+    | "minute_cap"
+    | "buy_minutes";
   toolName: string;
   emailSent: boolean;
+  /** Saved reading pace after set_speech_speed, so Talk can match the phone. */
+  speechRate?: CallInSpeechRate;
 };
 
 /**
@@ -192,6 +203,8 @@ const CAP_EXEMPT_TOOLS = new Set<string>([
   "get_connection_status",
   // Changing reading speed is cheap and must work even at the minute cap.
   "set_speech_speed",
+  // Buying more minutes must work when the caller is already at the cap.
+  "buy_minutes",
 ]);
 
 /** Passed down from the webhook once org usage is loaded. */
@@ -939,6 +952,18 @@ export function readIntentFromQuestion(
   if (/\b(next|another one|another email|go on)\b/.test(q)) {
     return { position: "next", question };
   }
+  if (
+    /^(?:please )?(?:repeat|repeat that|say that again|again|read it again|read that again)$/.test(
+      q,
+    )
+  ) {
+    return { position: "repeat", question };
+  }
+  if (
+    /^(?:please )?(?:previous(?: email| message| one)?|go back|back up)$/.test(q)
+  ) {
+    return { position: "previous", question };
+  }
   if (/\b(start over|from the beginning|first email|read them again)\b/.test(q)) {
     return { position: "first", question };
   }
@@ -975,6 +1000,7 @@ async function handleSetSpeechSpeed(
     intent: "speech_rate",
     toolName,
     emailSent: false,
+    speechRate: next,
   };
 }
 
@@ -991,6 +1017,29 @@ function speechCommandFromArgs(
       ? detectSpeechRateCommand(args.question)
       : null)
   );
+}
+
+async function handleBuyMinutes(
+  input: {
+    args?: Record<string, unknown>;
+    snapshot: CallInMailboxSnapshot;
+    requestedById?: string | null;
+    callerPhone?: string | null;
+  },
+  toolName: string,
+): Promise<VapiToolHandlerResult> {
+  const purchased = await startVoiceMinutePackPurchase({
+    organizationId: input.snapshot.organizationId,
+    userId: input.requestedById ?? null,
+    callerPhone: input.callerPhone ?? null,
+    packId: parseMinutePackFromArgs(input.args),
+  });
+  return {
+    spoken: purchased.spoken,
+    intent: "buy_minutes",
+    toolName,
+    emailSent: false,
+  };
 }
 
 export async function handleCallInTool(input: {
@@ -1031,6 +1080,10 @@ export async function handleCallInTool(input: {
   if (name === "set_speech_speed") {
     const command = speechCommandFromArgs(input.args) ?? "normal";
     return handleSetSpeechSpeed(input, command, name);
+  }
+
+  if (name === "buy_minutes") {
+    return handleBuyMinutes(input, name);
   }
 
   if (name === "provision_signup") {
@@ -1411,10 +1464,42 @@ export async function handleCallInTool(input: {
         emailSent: false,
       };
     }
+    if (
+      input.requestedById &&
+      input.snapshot.identityStatus === "matched" &&
+      input.snapshot.organizationId !== "demo_org" &&
+      input.snapshot.organizationId !== "unrecognized"
+    ) {
+      const owner = await getNodePrisma().user.findUnique({
+        where: { id: input.requestedById },
+        select: { email: true },
+      });
+      if (owner?.email) {
+        const researchSpoken = await speakResearchForOwner({
+          scope: {
+            organizationId: input.snapshot.organizationId,
+            workspaceId: input.snapshot.workspaceId,
+            userId: input.requestedById,
+            email: owner.email,
+            mailboxId: input.snapshot.mailboxId,
+          },
+          text: question,
+        });
+        if (researchSpoken) {
+          return { spoken: researchSpoken, intent: "unknown", toolName: name, emailSent: false };
+        }
+      }
+    }
     // "faster" / "slower" / "normal speed" spoken mid-read change the pace.
     const speedCommand = detectSpeechRateCommand(question);
     if (speedCommand) {
       return handleSetSpeechSpeed(input, speedCommand, name);
+    }
+    if (isBuyMinutesRequest(question)) {
+      return handleBuyMinutes(
+        { ...input, args: { ...(input.args ?? {}), question } },
+        name,
+      );
     }
     // Reading requests routed here still use the cursor, so "next" advances.
     const asRead = readIntentFromQuestion(question);
@@ -1687,6 +1772,27 @@ export function buildCallInVapiTools(serverUrl: string) {
     {
       type: "function",
       function: {
+        name: "buy_minutes",
+        description:
+          "Start a prepaid minute-pack purchase for this caller. Use when they say buy minutes, buy more time, top up, or name a pack (30 / 60 / 120 minutes). Never collect a card number on the call. If they have not chosen a size, omit minutes so the tool lists the packs. If they chose a size, pass minutes=30, 60, or 120. The tool texts a Stripe checkout link to their saved phone.",
+        parameters: {
+          type: "object",
+          properties: {
+            minutes: {
+              type: "string",
+              enum: ["30", "60", "120"],
+              description:
+                "Pack size. Omit when the caller has not chosen 30, 60, or 120 minutes yet.",
+            },
+          },
+          required: [],
+        },
+      },
+      server: toolServer,
+    },
+    {
+      type: "function",
+      function: {
         name: "get_briefing",
         description:
           "Accessibility briefing: read Primary-inbox emails needing attention aloud one at a time (from, subject, then message/preview). Skips promotions/social/updates/forums/spam unless the caller asked for those. Do not only give a count.",
@@ -1869,6 +1975,7 @@ export function buildCallInSystemPrompt(): string {
   return [
     `You are ${product.name}, a secure personal inbox assistant on an inbound phone call.`,
     "Accessibility-first: blind patrons rely on exact speech — READ tool results VERBATIM. Do not paraphrase, embroider, or invent details.",
+    "RESEARCH AND NOTES: when the caller asks to research, find papers, dictate an idea, continue a research discussion, explain the evidence, or email that research to himself, call ask_inbox with his exact words. Do not answer that scientific question yourself. Speak the tool result verbatim.",
     "The opening and first briefing/read tool result may contain the exact new-Primary-mail count since the caller's last completed call. Speak that count exactly; never estimate it or substitute unread/promotional counts.",
     "Default inbox scope is Gmail Primary only. Do not invent promotions, social, updates, forums, or spam. Follow tool results: if they say skipping promotional messages, speak that.",
     "Only include other tabs when the caller explicitly says read promotions, read junk, read everything, or similar. Then pass inboxScope=promotions or inboxScope=everything to read_emails. This composes with selection and count.",
@@ -1908,8 +2015,9 @@ export function buildCallInSystemPrompt(): string {
     "For reply to this one, call compose_email with replyToCurrent=true. For a name or nickname, let the tool resolve it. If the tool reports ambiguity, speak every candidate and ask which one; never guess.",
     "For calendar today, tomorrow, or next, call get_calendar and speak its result verbatim. If disconnected, tell them to use the optional Connect Calendar action in Settings. Never invent an event.",
     "For save this sender as Mom or call Jordan Lee Jordan, call save_contact_nickname. Never use a guessed contact.",
-    "MINUTES EXHAUSTED: if a tool result says the caller has no call minutes left (included and purchased both used up), speak that result VERBATIM and stop. Do not read mail, compose, or start any new request. Do not invent a workaround, an emergency buffer, or a way to keep going. Valid choices are: buy more minutes in the Inbox Chief dashboard, upgrade the plan, or wait for the next period.",
-    "BILLING SPEECH: Never say wallet, balance, billing, account credits, or any minute counts on your own. Never speak a negative number of minutes. Only speak minute-limit text when a tool result itself contains a hard-stop no-minutes-left message. When the caller asks to read mail, a briefing, or what needs attention, call the matching tool immediately — never lead with billing talk, never guess remaining minutes, and never skip reading because minutes might be low.",
+    "MINUTES EXHAUSTED: if a tool result says the caller has no call minutes left (included and purchased both used up), speak that result VERBATIM, then offer to buy more on this call. Call buy_minutes. Do not invent a workaround, an emergency buffer, or a way to keep reading without buying. Valid choices are: buy 30, 60, or 120 minutes on this call (a texted checkout link — never a card number), buy in the Inbox Chief dashboard, upgrade the plan, or wait for the next period.",
+    "BUY MINUTES: when the caller says buy minutes, buy more time, top up, or names 30 / 60 / 120 minutes, call buy_minutes. If they have not chosen a size, call buy_minutes with no minutes so the tool lists prices. If they chose a size, pass minutes=30, 60, or 120. Speak the tool result VERBATIM. NEVER ask for a card number, CVV, ZIP, or billing address on the call. Checkout happens on the texted link or in the dashboard.",
+    "BILLING SPEECH: Never say wallet, balance, billing, account credits, credit, or any minute counts on your own. Never speak a negative number of minutes. Never tell the caller they lack credit or funds. Never refuse read my emails, briefing, or what needs attention for billing reasons — call the matching tool immediately. Only speak minute-limit text when a tool result itself contains a hard-stop no-minutes-left message. Do not guess remaining minutes and do not skip reading because minutes might be low.",
     "MAILBOX RECONNECT: when a tool result says the mailbox needs reconnecting or Connect Gmail, speak only that reconnect guidance verbatim. Never mix reconnect speech with billing, wallet, or minute talk.",
     "Keep language plain. If only subject/from is available, say so and still read that metadata.",
     "When an unrecognized caller says sign up, create account, or get started: ask for their Gmail address, spell it back character by character, obtain explicit confirmation, then ask for an optional preferred name. Call provision_signup only after confirmation.",
@@ -1933,6 +2041,25 @@ function parsePositiveNumber(value: unknown, fallback: number): number {
   return fallback;
 }
 
+/**
+ * Apex inboxchief.email currently 308s to www. VAPI does not follow that
+ * redirect on POST, so tool-calls and assistant-request fail if the webhook
+ * is pointed at the apex. Use www until apex is the Production host.
+ */
+export function vapiWebhookOrigin(serverUrl: string): string {
+  const base = serverUrl.replace(/\/$/, "").trim() || "https://www.inboxchief.email";
+  try {
+    const url = new URL(base);
+    if (url.hostname === "inboxchief.email") {
+      url.hostname = "www.inboxchief.email";
+      return url.origin;
+    }
+    return url.origin;
+  } catch {
+    return "https://www.inboxchief.email";
+  }
+}
+
 export function buildCallInAssistantPayload(
   serverUrl: string,
   options?: {
@@ -1941,7 +2068,7 @@ export function buildCallInAssistantPayload(
     firstMessage?: string;
   },
 ): Record<string, unknown> {
-  const base = serverUrl.replace(/\/$/, "");
+  const base = vapiWebhookOrigin(serverUrl);
   const webhookUrl = `${base}/api/call-in/vapi/webhook`;
   const webhookHeaders: Record<string, string> = {};
   if (process.env.VAPI_WEBHOOK_SECRET) {

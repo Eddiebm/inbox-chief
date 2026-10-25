@@ -5,7 +5,6 @@ import {
   emptyCallMinuteUsage,
   loadCallMinuteUsageForOrg,
 } from "@/lib/billing/call-usage-server";
-import { isSoftCallUsageWarning } from "@/lib/billing/call-usage";
 import {
   answerCallInQuestionWithLlm,
   demoMailboxSnapshot,
@@ -16,14 +15,17 @@ import { resolveSnapshotForUser } from "@/lib/call-in/identity";
 import { resolveSpeechTimeZone } from "@/lib/call-in/speak-received";
 import { resolveCallInVoiceForUser } from "@/lib/call-in/voice-preference";
 import { getDefaultPlan } from "@/lib/plans";
+import { dispatchTalkAction } from "@/lib/call-in/talk-dispatch";
+import { speakResearchForOwner } from "@/lib/research/from-voice";
 import { product } from "@/lib/product";
 import { queueAttachmentDelivery } from "@/lib/attachment-deliveries";
 
-const askSchema = z.object({
+export const askSchema = z.object({
   question: z.string().trim().min(1).max(2000),
   preferredName: z.string().trim().min(1).max(80).optional(),
   sessionId: z.string().trim().min(1).max(120).optional(),
   timeZone: z.string().trim().min(1).max(80).optional(),
+  pendingDraftId: z.string().trim().min(1).max(80).nullish(),
 });
 
 export function attachmentRouteNumbers(question: string): {
@@ -50,7 +52,8 @@ export function attachmentRouteNumbers(question: string): {
 /**
  * Anytime ask endpoint shared by web voice and future authenticated clients.
  * Uses the signed-in user's real mailbox when available; demo only in mock mode
- * or when no mailbox is connected. Never sends email.
+ * or when no mailbox is connected. A new email is only a draft until the
+ * caller explicitly says send it for that draft.
  */
 export async function POST(request: Request) {
   let body: unknown;
@@ -94,6 +97,67 @@ export async function POST(request: Request) {
   }
 
   const routeNumbers = attachmentRouteNumbers(parsed.data.question);
+  if (
+    !routeNumbers &&
+    user &&
+    user.id !== "mock_user" &&
+    snapshot.identityStatus === "matched" &&
+    snapshot.organizationId !== "demo_org" &&
+    snapshot.organizationId !== "unrecognized"
+  ) {
+    const researchSpoken = await speakResearchForOwner({
+      scope: {
+        organizationId: snapshot.organizationId,
+        workspaceId: snapshot.workspaceId,
+        userId: user.id,
+        email: user.email,
+        mailboxId: snapshot.mailboxId,
+      },
+      text: parsed.data.question,
+    });
+    if (researchSpoken) {
+      return NextResponse.json({
+        ok: true,
+        product: product.name,
+        sessionId: parsed.data.sessionId ?? `web_${Date.now()}`,
+        intent: "research",
+        spoken: researchSpoken,
+        llmAssisted: false,
+        llmProvider: null,
+        identityStatus: snapshot.identityStatus,
+        mailboxEmail: snapshot.mailboxEmail,
+        draftId: null,
+        speechRate: null,
+        canContinue: true,
+      });
+    }
+  }
+
+  if (!routeNumbers) {
+    const talkAction = await dispatchTalkAction({
+      text: parsed.data.question,
+      snapshot,
+      userId: user && user.id !== "mock_user" ? user.id : "demo_listener",
+      pendingDraftId: parsed.data.pendingDraftId ?? null,
+      callId: parsed.data.sessionId ?? null,
+    });
+    if (talkAction) {
+      return NextResponse.json({
+        ok: true,
+        product: product.name,
+        sessionId: parsed.data.sessionId ?? `web_${Date.now()}`,
+        intent: talkAction.intent,
+        spoken: talkAction.spoken,
+        llmAssisted: false,
+        llmProvider: null,
+        identityStatus: snapshot.identityStatus,
+        mailboxEmail: snapshot.mailboxEmail,
+        draftId: talkAction.draftId,
+        speechRate: talkAction.speechRate,
+        canContinue: talkAction.intent !== "goodbye",
+      });
+    }
+  }
   const answer = routeNumbers
     ? await queueAttachmentDelivery({
         snapshot,
@@ -111,22 +175,6 @@ export async function POST(request: Request) {
       });
 
   let spoken = answer.spoken;
-  if (
-    user &&
-    user.id !== "mock_user" &&
-    snapshot.organizationId !== "demo_org" &&
-    snapshot.organizationId !== "unrecognized" &&
-    snapshot.organizationId !== "no_mailbox"
-  ) {
-    try {
-      const usage = await loadCallMinuteUsageForOrg(snapshot.organizationId);
-      if (isSoftCallUsageWarning(usage.warningLevel) && usage.spokenWarning) {
-        spoken = `${spoken} ${usage.spokenWarning}`;
-      }
-    } catch {
-      /* keep the email speech — never drop it for usage */
-    }
-  }
 
   return NextResponse.json({
     ok: true,

@@ -23,7 +23,7 @@ describe("voice provisioning", () => {
 
     expect(VAPI_CALL_IN_TOOL_NAMES).toContain("provision_signup");
     expect(names).toContain("provision_signup");
-    expect(names).toContain("check_provision_status");
+    expect(names).toContain("buy_minutes");
     expect(names.some((name) => /send.*email/i.test(name))).toBe(false);
   });
 

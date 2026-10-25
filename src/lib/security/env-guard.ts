@@ -7,7 +7,7 @@
  * who has read the repository.
  */
 
-import { isPlaceholderSecret, isProductionRuntime } from "@/lib/security/secrets";
+import { isPlaceholderSecret, isProductionRuntime } from "@/lib/security/runtime-flags";
 
 export type InsecureSecret = {
   name: string;

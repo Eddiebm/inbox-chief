@@ -164,7 +164,7 @@ describe("call minute usage with purchased balance", () => {
     expect(usage.includedExhausted).toBe(true);
     expect(usage.totalMinutesRemaining).toBe(0);
     expect(usage.estimatedOverageUsd).toBe(0);
-    expect(usage.spokenCapReached).toContain("buy more minutes");
+    expect(usage.spokenCapReached).toContain("buy 30 minutes");
     expect(usage.spokenCapReached).toContain("no purchased minutes remaining");
     expect(usage.plainSummary).toContain("No purchased minutes left");
   });
@@ -236,7 +236,7 @@ describe("call minute usage with purchased balance", () => {
 
   it("speaks a calm fully-out message with buy / upgrade / wait choices", () => {
     const spoken = buildSpokenCapReached(CTX);
-    expect(spoken).toContain("buy more minutes");
+    expect(spoken).toContain("buy 30 minutes");
     expect(spoken).toContain("upgrade your plan");
     expect(spoken).toContain("September 1");
     expect(spoken.toLowerCase()).not.toContain("overage");

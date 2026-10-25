@@ -2,13 +2,10 @@ export type ProvisioningSmsResult =
   | { sent: true; provider: "twilio" }
   | { sent: false; reason: "not_configured" | "failed" };
 
-/**
- * Optional SMS handoff. If Twilio is not configured, the caller receives the
- * short code and public provision URL aloud instead.
- */
-export async function sendProvisioningSms(input: {
+/** Send an SMS via Twilio. Used for Gmail setup and minute-pack checkout links. */
+export async function sendSms(input: {
   to: string;
-  magicLink: string;
+  body: string;
 }): Promise<ProvisioningSmsResult> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const authToken = process.env.TWILIO_AUTH_TOKEN?.trim();
@@ -23,7 +20,7 @@ export async function sendProvisioningSms(input: {
   const body = new URLSearchParams({
     To: input.to,
     From: from,
-    Body: `Inbox Chief: connect Gmail to finish setup. This private link expires in 24 hours: ${input.magicLink}`,
+    Body: input.body,
   });
   try {
     const response = await fetch(
@@ -38,12 +35,26 @@ export async function sendProvisioningSms(input: {
       },
     );
     if (!response.ok) {
-      console.warn("[provisioning] Twilio SMS failed", response.status);
+      console.warn("[sms] Twilio SMS failed", response.status);
       return { sent: false, reason: "failed" };
     }
     return { sent: true, provider: "twilio" };
   } catch (error) {
-    console.warn("[provisioning] Twilio SMS failed", error);
+    console.warn("[sms] Twilio SMS failed", error);
     return { sent: false, reason: "failed" };
   }
+}
+
+/**
+ * Optional SMS handoff. If Twilio is not configured, the caller receives the
+ * short code and public provision URL aloud instead.
+ */
+export async function sendProvisioningSms(input: {
+  to: string;
+  magicLink: string;
+}): Promise<ProvisioningSmsResult> {
+  return sendSms({
+    to: input.to,
+    body: `Inbox Chief: connect Gmail to finish setup. This private link expires in 24 hours: ${input.magicLink}`,
+  });
 }

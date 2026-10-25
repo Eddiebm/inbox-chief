@@ -2,3 +2,11 @@
 .env.*
 !.env.example
 .vercel
+
+# Local-only debug scripts (not part of the app build)
+scripts/_*
+
+# Local slide and PDF scratch, not served by the app
+tmp
+output
+outputs

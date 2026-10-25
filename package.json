@@ -14,6 +14,8 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts",
     "vapi:setup-call-in": "tsx scripts/vapi-setup-call-in.ts",
+    "grant-minutes": "tsx scripts/grant-minutes.ts",
+    "reset-password": "tsx scripts/reset-password.ts",
     "typecheck": "tsc --noEmit",
     "deploy:cf": "OPEN_NEXT_WORKER=1 opennextjs-cloudflare build && node scripts/fix-cf-pg.mjs && opennextjs-cloudflare deploy",
     "preview": "OPEN_NEXT_WORKER=1 opennextjs-cloudflare build && node scripts/fix-cf-pg.mjs && opennextjs-cloudflare preview",

@@ -141,7 +141,8 @@ a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
 }
@@ -1149,6 +1150,27 @@ html[data-reduced-motion="reduce"] *::after {
   gap: 1.5rem;
 }
 
+.dash-app--talk .skip-link,
+.dash-app--talk .dash-header,
+.dash-app--talk .dash-nav,
+.dash-app--talk .dash-footer {
+  display: none;
+}
+
+.dash-app--talk .dash-layout {
+  display: block;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  min-height: 100dvh;
+}
+
+.dash-app--talk .dash-body {
+  min-height: 100dvh;
+  padding: 0;
+}
+
 @media (min-width: 900px) {
   .dash-layout {
     grid-template-columns: 14rem 1fr;
@@ -1736,6 +1758,301 @@ button.linkish {
 .btn-danger:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.agent-home {
+  max-width: 40rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.agent-intro h1,
+.agent-panel h2,
+.agent-record h2 {
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.agent-intro h1 {
+  font-size: clamp(1.8rem, 3vw, 2.4rem);
+  line-height: 1.15;
+}
+
+.agent-kicker {
+  margin: 0 0 0.35rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.agent-lead,
+.agent-status,
+.agent-warning,
+.agent-panel p,
+.agent-record p {
+  margin: 0;
+}
+
+.agent-lead {
+  margin-top: 0.55rem;
+  max-width: 36rem;
+  color: var(--foreground);
+}
+
+.agent-stage,
+.agent-panel,
+.agent-record,
+.agent-more {
+  padding: 1.25rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.agent-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.agent-status {
+  padding-left: 0.85rem;
+  border-left: 3px solid var(--accent);
+  font-weight: 700;
+}
+
+.agent-warning {
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  color: var(--danger);
+}
+
+.agent-talk {
+  min-height: 4.25rem;
+  font-size: 1.35rem;
+  letter-spacing: -0.02em;
+}
+
+.talk-only {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: var(--background);
+}
+
+.talk-mic {
+  position: relative;
+  width: min(70vw, 18rem);
+  height: min(70vw, 18rem);
+  border: 3px solid var(--border);
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.talk-mic:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 6px;
+}
+
+.talk-mic__icon {
+  width: 42%;
+  height: 42%;
+}
+
+.talk-mic__ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid var(--accent);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.talk-mic[data-state="listening"] .talk-mic__ring,
+.talk-mic[data-state="working"] .talk-mic__ring {
+  animation: talk-radiate 1.8s ease-out infinite;
+}
+
+.talk-mic[data-state="listening"] .talk-mic__ring--late,
+.talk-mic[data-state="working"] .talk-mic__ring--late {
+  animation-delay: 0.6s;
+}
+
+@keyframes talk-radiate {
+  from {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  to {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talk-mic__ring {
+    animation: none;
+    opacity: 0;
+  }
+
+  .talk-mic[data-state="listening"],
+  .talk-mic[data-state="working"] {
+    outline: 4px solid var(--focus);
+    outline-offset: 8px;
+  }
+}
+
+.agent-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+@media (min-width: 720px) {
+  .agent-actions {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.agent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.agent-actions .btn-secondary,
+.agent-row .btn-secondary,
+.agent-row .btn-danger,
+.agent-session-list .btn-secondary {
+  min-height: 2.75rem;
+}
+
+.agent-panel,
+.agent-record {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.agent-record__head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  align-items: baseline;
+}
+
+.agent-record__head p {
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.agent-transcript {
+  white-space: pre-wrap;
+  min-height: 8rem;
+  margin: 0;
+  padding: 0;
+  line-height: 1.6;
+}
+
+.agent-sources,
+.agent-session-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.agent-sources li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.agent-sources span,
+.agent-session-when {
+  color: var(--foreground);
+  font-size: 0.9rem;
+  opacity: 0.75;
+}
+
+.agent-session-list .btn-secondary {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  text-align: left;
+}
+
+.agent-more > :not(summary) {
+  margin-top: 1rem;
+}
+
+.agent-more summary {
+  min-height: 2.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.agent-type,
+.agent-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.agent-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.65rem;
+  font-weight: 600;
+}
+
+.agent-home textarea,
+.agent-home input[type="number"],
+.agent-home input[type="file"] {
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.agent-home input[type="radio"],
+.agent-home input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--accent);
+}
+
+.agent-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0;
 }
 
 .account-data-section {

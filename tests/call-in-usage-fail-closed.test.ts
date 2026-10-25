@@ -104,8 +104,8 @@ describe("call minute usage failures fail closed", () => {
   it("serves normally when the balance loads with minutes left", async () => {
     mocks.loadCallMinuteUsageForOrg.mockResolvedValue({
       hardCapReached: false,
-      warningLevel: "none",
-      spokenWarning: "",
+      warningLevel: "approaching",
+      spokenWarning: "Heads up: you're nearing your included call minutes for this period.",
       spokenCapReached: "unused",
     });
 
@@ -113,5 +113,35 @@ describe("call minute usage failures fail closed", () => {
     if (!("results" in result)) throw new Error("expected tool results");
     expect(result.results[0]?.result).not.toBe(USAGE_UNAVAILABLE_SPOKEN);
     expect(result.results[0]?.result).toMatch(/Email 1 of|From Jordan/i);
+    expect(result.results[0]?.result).not.toMatch(/wallet|balance|billing|included call minutes/i);
+  });
+
+  it("does not append soft minute warnings to read_emails on reconnect mailboxes", async () => {
+    mocks.loadCallMinuteUsageForOrg.mockResolvedValue({
+      hardCapReached: false,
+      warningLevel: "approaching",
+      spokenWarning: "Heads up: you're nearing your included call minutes for this period.",
+      spokenCapReached: "unused",
+    });
+    mocks.resolveSnapshotForCaller.mockResolvedValue({
+      snapshot: {
+        ...matchedSnapshot,
+        connectionStatus: "error",
+        organizationId: "cmsp0nk45000004jmn8y9rle9",
+        readableEmails: [],
+        securityNote:
+          "Your mailbox needs reconnecting. Open Settings and tap Connect Gmail, then try again. Nothing sends without your approval.",
+      },
+      matched: true,
+      phoneE164: "+14055106989",
+      callInIdentityId: "cid_1",
+      userId: null,
+      source: "call_in_identity",
+    });
+
+    const result = await handleVapiCallInWebhook(toolCallBody(["read_emails"]));
+    if (!("results" in result)) throw new Error("expected tool results");
+    expect(result.results[0]?.result).toMatch(/needs reconnecting/i);
+    expect(result.results[0]?.result).not.toMatch(/wallet|balance|billing|included call minutes/i);
   });
 });

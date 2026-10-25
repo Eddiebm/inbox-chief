@@ -15,10 +15,10 @@
  *   CALL_IN_PUBLIC_BASE_URL=https://inboxchief.email
  */
 import "dotenv/config";
-import { buildCallInAssistantPayload } from "../src/lib/call-in/vapi-tools";
+import { buildCallInAssistantPayload, vapiWebhookOrigin } from "../src/lib/call-in/vapi-tools";
 
 const VAPI_BASE = "https://api.vapi.ai";
-const DEFAULT_PROD_BASE = "https://inboxchief.email";
+const DEFAULT_PROD_BASE = "https://www.inboxchief.email";
 const DEFAULT_CALL_IN_NUMBER = "+14057169240";
 
 type VapiPhoneNumber = {
@@ -26,6 +26,8 @@ type VapiPhoneNumber = {
   number?: string;
   name?: string;
   assistantId?: string | null;
+  serverUrl?: string | null;
+  server?: { url?: string; headers?: Record<string, string> } | null;
 };
 
 function authHeaders(apiKey: string): HeadersInit {
@@ -60,6 +62,32 @@ async function vapiJson<T>(
   return (await res.json()) as T;
 }
 
+/**
+ * PATCH must send x-vapi-secret whenever production already has one.
+ * An empty local env would otherwise replace `server` without headers and
+ * 401 every live tool-call.
+ */
+async function resolveWebhookSecret(
+  apiKey: string,
+  existingAssistantId: string | undefined,
+): Promise<string | null> {
+  const fromEnv = process.env.VAPI_WEBHOOK_SECRET?.trim();
+  if (fromEnv) return fromEnv;
+  if (!existingAssistantId) return null;
+  try {
+    const existing = await vapiJson<{
+      server?: { headers?: Record<string, string> };
+    }>(apiKey, "GET", `/assistant/${existingAssistantId}`);
+    const headers = existing.server?.headers ?? {};
+    const secret =
+      headers["x-vapi-secret"]?.trim() || headers["X-Vapi-Secret"]?.trim();
+    return secret || null;
+  } catch (err) {
+    console.warn("Could not read existing VAPI webhook secret from assistant", err);
+    return null;
+  }
+}
+
 async function findPhoneNumberId(
   apiKey: string,
   wantedE164: string,
@@ -74,9 +102,19 @@ async function assignPhoneAssistant(
   apiKey: string,
   phoneNumberId: string,
   assistantId: string,
+  serverUrl: string,
+  webhookSecret: string | null,
 ): Promise<VapiPhoneNumber> {
+  const webhookUrl = `${serverUrl.replace(/\/$/, "")}/api/call-in/vapi/webhook`;
+  const server: { url: string; headers?: Record<string, string> } = {
+    url: webhookUrl,
+  };
+  if (webhookSecret) {
+    server.headers = { "x-vapi-secret": webhookSecret };
+  }
   return vapiJson<VapiPhoneNumber>(apiKey, "PATCH", `/phone-number/${phoneNumberId}`, {
     assistantId,
+    server,
   });
 }
 
@@ -103,7 +141,7 @@ Steps for Eddie (Dashboard — if you prefer UI):
   1. Open https://dashboard.vapi.ai and sign in
   2. Left nav → Assistants → Create Assistant
        Name: Inbox Chief — Anytime Call-in
-       Server URL: https://inboxchief.email/api/call-in/vapi/webhook
+       Server URL: https://www.inboxchief.email/api/call-in/vapi/webhook
        Save / publish
   3. Left nav → Phone Numbers → click +1 (405) 716-9240
   4. Inbound Assistant / Assistant → select "Inbox Chief — Anytime Call-in"
@@ -113,21 +151,27 @@ Steps for Eddie (Dashboard — if you prefer UI):
     process.exit(0);
   }
 
-  const serverUrl =
+  const serverUrl = vapiWebhookOrigin(
     process.env.CALL_IN_PUBLIC_BASE_URL?.trim() ||
-    process.env.NEXT_PUBLIC_APP_URL?.trim() ||
-    DEFAULT_PROD_BASE;
+      process.env.NEXT_PUBLIC_APP_URL?.trim() ||
+      DEFAULT_PROD_BASE,
+  );
 
   const callInNumber = normalizeE164(
     process.env.NEXT_PUBLIC_VAPI_CALL_IN_NUMBER?.trim() || DEFAULT_CALL_IN_NUMBER,
   );
+
+  const existingId = process.env.VAPI_ASSISTANT_ID?.trim();
+  const webhookSecret = await resolveWebhookSecret(apiKey, existingId);
+  if (webhookSecret && !process.env.VAPI_WEBHOOK_SECRET?.trim()) {
+    process.env.VAPI_WEBHOOK_SECRET = webhookSecret;
+  }
 
   const payload = buildCallInAssistantPayload(serverUrl, {
     // Dashboard default = Standard (Cartesia). Live calls override via assistant-request
     // to Premium (ElevenLabs) for Pro patrons who keep the Premium preference.
     voiceTier: "standard",
   });
-  const existingId = process.env.VAPI_ASSISTANT_ID?.trim();
 
   console.log(`Using server URL: ${serverUrl}/api/call-in/vapi/webhook`);
   console.log(`Target inbound number: ${callInNumber}`);
@@ -166,7 +210,13 @@ Steps for Eddie (Dashboard — if you prefer UI):
     console.log(`Found phone number id: ${phoneNumberId}`);
   }
 
-  const assigned = await assignPhoneAssistant(apiKey, phoneNumberId, assistantId);
+  const assigned = await assignPhoneAssistant(
+    apiKey,
+    phoneNumberId,
+    assistantId,
+    serverUrl,
+    webhookSecret,
+  );
   console.log(`✓ Assigned phone ${phoneNumberId} → assistant ${assistantId}`);
 
   const verified = await verifyPhoneAssistant(apiKey, phoneNumberId);
@@ -180,6 +230,7 @@ Steps for Eddie (Dashboard — if you prefer UI):
 ✓ Verified GET /phone-number/${phoneNumberId}
   number:      ${verified.number ?? callInNumber}
   assistantId: ${verified.assistantId}
+  server:      ${verified.server?.url ?? "missing"}
 
 Eddie re-test:
   1. From the phone registered in Inbox Chief Settings → Anytime call-in

@@ -208,7 +208,7 @@ export function formatResetDateLabel(periodEnd: Date): string {
  * Calm and clear for blind patrons: buy more, upgrade, or wait.
  */
 export function buildSpokenCapReached(ctx: CallUsageMessageContext): string {
-  return `You have no call minutes left. Your ${ctx.minutesIncluded} included minutes for this ${ctx.planName} period are used up, and you have no purchased minutes remaining. To keep using call-in, buy more minutes or upgrade your plan in the Inbox Chief dashboard, or wait until your included minutes reset on ${ctx.resetDateLabel}. I cannot read more mail or start a new request until then.`;
+  return `You have no call minutes left. Your ${ctx.minutesIncluded} included minutes for this ${ctx.planName} period are used up, and you have no purchased minutes remaining. To keep using call-in, say buy 30 minutes, buy 60 minutes, or buy 120 minutes on this call and I will text a checkout link — I never take card numbers on the phone — or buy in the Inbox Chief dashboard, upgrade your plan, or wait until your included minutes reset on ${ctx.resetDateLabel}. I cannot read more mail or start a new request until then.`;
 }
 
 /**

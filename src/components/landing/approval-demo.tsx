@@ -79,7 +79,7 @@ export function ApprovalDemo() {
         </span>
         <span className="demo__counter-label">
           {sent === 0
-            ? "messages sent without you"
+            ? "messages sent without your approval"
             : "message sent, because you approved it"}
         </span>
       </div>

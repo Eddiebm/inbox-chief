@@ -63,9 +63,18 @@ function parsePrefs(raw: string | null): A11yPreferences {
   }
 }
 
+let cachedRaw: string | null | undefined;
+let cachedPrefs: A11yPreferences = DEFAULT_A11Y;
+
+// useSyncExternalStore requires a referentially stable snapshot between changes.
 function readStored(): A11yPreferences {
   if (typeof window === "undefined") return DEFAULT_A11Y;
-  return parsePrefs(localStorage.getItem(A11Y_STORAGE_KEY));
+  const raw = localStorage.getItem(A11Y_STORAGE_KEY);
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
+    cachedPrefs = parsePrefs(raw);
+  }
+  return cachedPrefs;
 }
 
 function applyToDocument(prefs: A11yPreferences) {

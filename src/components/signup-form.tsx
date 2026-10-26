@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { TERMS_VERSION } from "@/lib/legal";
 
 type SignupStatus = "idle" | "submitting" | "error" | "success";
 
@@ -20,6 +21,12 @@ export function SignupForm() {
     const form = event.currentTarget;
     const data = new FormData(form);
 
+    if (data.get("acceptedTerms") !== "on") {
+      setStatus("error");
+      setMessage("Tick the box to accept the Terms of Service and Privacy Policy.");
+      return;
+    }
+
     try {
       const response = await fetch("/api/auth/signup", {
         method: "POST",
@@ -28,6 +35,8 @@ export function SignupForm() {
           name: String(data.get("name") ?? "").trim(),
           email: String(data.get("email") ?? "").trim(),
           password: String(data.get("password") ?? ""),
+          acceptedTerms: data.get("acceptedTerms") === "on",
+          termsVersion: TERMS_VERSION,
         }),
       });
 
@@ -101,6 +110,20 @@ export function SignupForm() {
         <p className="field__hint">
           Use at least 10 characters. Stored securely when auth is enabled.
         </p>
+      </div>
+
+      <div className="field field--check">
+        <input
+          id={`${formId}-terms`}
+          name="acceptedTerms"
+          type="checkbox"
+          required
+        />
+        <label htmlFor={`${formId}-terms`}>
+          I am 18 or older and I agree to the{" "}
+          <a href="/terms">Terms of Service</a> (including binding individual
+          arbitration) and the <a href="/privacy">Privacy Policy</a>.
+        </label>
       </div>
 
       <button

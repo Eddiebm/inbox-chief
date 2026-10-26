@@ -894,3 +894,22 @@ body {
 .legal-prose a {
   padding-block: 0.3em;
 }
+
+.field--check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.75rem;
+}
+
+.field--check input[type="checkbox"] {
+  width: 1.75rem;
+  height: 1.75rem;
+  min-height: 0;
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.field--check label {
+  font-weight: 400;
+}

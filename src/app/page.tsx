@@ -223,8 +223,11 @@ export default function HomePage() {
                   <tbody>
                     {auditRows.map((r) => (
                       <tr key={r.what}>
-                        <th scope="row">{r.what}</th>
-                        <td>{r.why}</td>
+                        <th scope="row">
+                          {r.what}
+                          <span className="lp-table__why">{r.why}</span>
+                        </th>
+                        <td className="lp-table__why-col">{r.why}</td>
                         <td>
                           <span className="lp-status">{r.status}</span>
                         </td>

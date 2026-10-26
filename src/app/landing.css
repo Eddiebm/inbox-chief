@@ -734,3 +734,163 @@ body {
 .site-footer__list {
   gap: 0 1.5rem;
 }
+
+/* Mobile */
+.lp-table__why {
+  display: none;
+}
+
+@media (max-width: 40rem) {
+  .site-header__inner {
+    gap: 0 0.75rem;
+    min-height: 0;
+    padding-block: 0.4rem;
+  }
+
+  .site-brand {
+    order: 1;
+  }
+
+  .site-header__actions {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .site-header__actions .btn--primary {
+    display: none;
+  }
+
+  .site-nav {
+    order: 3;
+    width: 100%;
+    margin: 0;
+  }
+
+  .site-nav__list {
+    justify-content: space-between;
+    gap: 0 0.5rem;
+  }
+
+  .lp-hero {
+    padding: 2.25em 0 2em;
+  }
+
+  .lp-hero__lead {
+    font-size: 1.15em;
+  }
+
+  .lp-ctas {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .lp-ctas .btn {
+    width: 100%;
+  }
+
+  .lp-promise {
+    padding-top: 1.75em;
+    font-size: 1.25em;
+  }
+
+  .lp-section {
+    padding-top: 3.25em;
+  }
+
+  .lp-section__body {
+    margin-top: 1.5em;
+  }
+
+  .lp-cta {
+    margin-top: 3.25em;
+    padding: 3em 0 3.5em;
+  }
+
+  .demo__counter,
+  .demo__mail,
+  .demo__log {
+    padding-inline: 1em;
+  }
+
+  .demo__actions .demo__btn {
+    flex: 1 1 8em;
+    justify-content: center;
+  }
+
+  .lp .a11y-controls:not(.a11y-controls--compact) {
+    padding: 1.1em;
+  }
+
+  .lp-table {
+    min-width: 0;
+  }
+
+  .lp-table__why {
+    display: block;
+    margin-top: 0.25em;
+    font-weight: 400;
+    color: var(--muted);
+  }
+
+  .lp-table__why-col,
+  .lp-table thead th:nth-child(2) {
+    display: none;
+  }
+
+  .lp-table th,
+  .lp-table td {
+    padding: 0.9em 1em;
+  }
+
+  .lp-table tbody th {
+    width: 58%;
+  }
+
+  .lp-status {
+    white-space: normal;
+  }
+
+  .site-footer__list {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0 1rem;
+  }
+
+  .auth-main,
+  .auth-page {
+    padding: 2rem 1rem 3rem;
+  }
+
+  .auth-form,
+  .auth-card,
+  .signup-form {
+    padding: 1.25rem;
+  }
+
+  .signup-aside {
+    padding: 1.25rem;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .demo__btn kbd {
+    display: none;
+  }
+}
+
+.site-footer__link {
+  min-width: 3rem;
+}
+
+.auth-form p,
+.signup-alt,
+.legal-prose p,
+.legal-prose li {
+  line-height: 1.9;
+}
+
+.auth-form p a,
+.signup-alt a,
+.legal-prose a {
+  padding-block: 0.3em;
+}

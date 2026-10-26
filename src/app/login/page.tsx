@@ -5,7 +5,7 @@ import { LoginForm } from "@/components/login-form";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Sign in · ${product.name}`,
+  title: "Sign in",
   description: `Sign in to ${product.name}`,
 };
 

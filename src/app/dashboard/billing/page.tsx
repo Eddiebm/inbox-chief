@@ -3,7 +3,7 @@ import { BillingPanel } from "@/components/billing/billing-panel";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Billing · ${product.name}`,
+  title: "Billing",
 };
 
 export default function BillingPage() {

@@ -8,5 +8,6 @@
       "path": "/api/cron/account-deletions",
       "schedule": "30 15 * * *"
     }
-  ]
+  ],
+  "buildCommand": "node scripts/check-legal.mjs && npm run build"
 }

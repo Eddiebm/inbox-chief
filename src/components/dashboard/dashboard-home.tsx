@@ -172,6 +172,16 @@ export function DashboardHome() {
           ask anytime — nothing sends without your approval.
         </p>
         <p className="dash-welcome__callin">
+          <Link href="/dashboard/talk">Talk</Link> — the page asks what you
+          want when it opens. Tap to speak. You can read mail, email someone,
+          or check your calendar. Nothing sends until you say send it.
+        </p>
+        <p className="dash-welcome__callin">
+          <Link href="/dashboard/agent">Research and notes</Link> — press Talk
+          to speak, continue earlier work, or type. Nothing sends without your
+          approval.
+        </p>
+        <p className="dash-welcome__callin">
           Need an update right now?{" "}
           <Link href="/dashboard/call-in">Call in or ask anytime</Link> —
           Primary inbox only. Nothing sends from that conversation.

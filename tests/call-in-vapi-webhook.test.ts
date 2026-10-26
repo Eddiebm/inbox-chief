@@ -178,7 +178,7 @@ describe("VAPI call-in webhook tool routing", () => {
 
   it("hard cap denies billable tools and speaks the exhausted message verbatim", async () => {
     const capSpoken =
-      "You have no call minutes left. Your 90 included minutes for this Patron period are used up, and you have no purchased minutes remaining. To keep using call-in, buy more minutes or upgrade your plan in the Inbox Chief dashboard, or wait until your included minutes reset on September 1. I cannot read more mail or start a new request until then.";
+      "You have no call minutes left. Your 90 included minutes for this Patron period are used up, and you have no purchased minutes remaining. To keep using call-in, say buy 30 minutes, buy 60 minutes, or buy 120 minutes on this call and I will text a checkout link — I never take card numbers on the phone — or buy in the Inbox Chief dashboard, upgrade your plan, or wait until your included minutes reset on September 1. I cannot read more mail or start a new request until then.";
     const hardCap = { reached: true, spoken: capSpoken };
 
     // Reading / composing / asking is denied at the cap — no mail is read.
@@ -197,7 +197,7 @@ describe("VAPI call-in webhook tool routing", () => {
       });
       expect(handled.intent).toBe("minute_cap");
       expect(handled.spoken).toBe(capSpoken);
-      expect(handled.spoken.toLowerCase()).toContain("buy more minutes");
+      expect(handled.spoken.toLowerCase()).toContain("buy 30 minutes");
       expect(handled.emailSent).toBe(false);
       expect(handled.spoken).not.toMatch(/Schedule confirmation|Jordan Lee/i);
     }

@@ -237,6 +237,55 @@ paste the same value into the VAPI assistant's server-URL headers *before or at*
 the deploy. The webhook now fails closed, so a deploy without it takes call-in
 offline rather than leaving it open.
 
+## Grant free call minutes (operator comp)
+
+Patrons draw **included plan minutes first**, then **purchased minutes** (rollover).
+Use this when comping minutes — no Stripe checkout required.
+
+```bash
+# By patron sign-in email
+npm run grant-minutes -- --email courtneycdx@gmail.com --minutes 120 \
+  --granted-by eddie@coareholdings.com --reason "Founder comp"
+
+# By call-in phone
+npm run grant-minutes -- --phone +14055106989 --minutes 120
+
+# By connected mailbox
+npm run grant-minutes -- --mailbox eddie@bannermanmenson.com --minutes 120
+
+# Preview only
+npm run grant-minutes -- --email patron@example.com --minutes 120 --dry-run
+```
+
+- Credits `CallMinuteBalance.purchasedMinutesRemaining` (rollover wallet).
+- Writes a `CallMinutePackPurchase` row (`packId: operator_grant`, `$0`).
+- Writes an audit log (`MANAGE_BILLING`) when a workspace exists.
+- Pass `--idempotency-key some-unique-label` to safely re-run without double-credit.
+
+Requires `DATABASE_URL` in `.env` (Neon production or local).
+
+## Reset a patron password (operator)
+
+Forgot-password email requires `RESEND_API_KEY` on Vercel. If reset email is not configured, use the CLI:
+
+```bash
+# Generate and set a temporary password (printed once)
+npm run reset-password -- --email eddie@coareholdings.com
+
+# Optional: also print a 1-hour reset link
+npm run reset-password -- --email patron@example.com --reset-link
+
+# Preview lookup only
+npm run reset-password -- --email patron@example.com --dry-run
+```
+
+Patron sign-in: **https://www.inboxchief.email/login** (alias: `/signin`).
+
+To enable self-serve reset email, add to Vercel Production:
+- `RESEND_API_KEY`
+- `RESEND_FROM` (verified sender, e.g. `Inbox Chief <noreply@inboxchief.email>`)
+- `NEXT_PUBLIC_APP_URL=https://www.inboxchief.email`
+
 ## Env reminders
 
 ```
@@ -260,6 +309,14 @@ STRIPE_PRICE_MINUTES_60=
 STRIPE_PRICE_MINUTES_120=
 STRIPE_WEBHOOK_SECRET=
 ```
+
+## Research agent
+
+Owner page: `/dashboard/agent`. Setup, export, restore, provider keys, and cost notes: [RESEARCH_AGENT.md](./RESEARCH_AGENT.md).
+
+Courtney has not yet completed the hands-on acceptance test. Do not mark that passed from this runbook.
+
+Research rows are owner-scoped. Do not sign in as the patron to maintain the account. Use a separate operator login. Failed task logs contain error codes, not transcripts.
 
 ## Hard product rules
 

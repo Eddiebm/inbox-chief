@@ -5,7 +5,7 @@ import { ForgotPasswordForm } from "@/components/forgot-password-form";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Forgot password · ${product.name}`,
+  title: "Forgot password",
   description: `Reset your ${product.name} password, or ask Inbox Chief to set a temporary password.`,
 };
 

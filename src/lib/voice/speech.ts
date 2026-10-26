@@ -9,6 +9,9 @@ export type SpeakOptions = {
   volume?: number;
   /** Called if speech synthesis is unavailable; still resolves. */
   onUnsupported?: () => void;
+  onStart?: () => void;
+  /** Character index of the word currently being spoken. */
+  onBoundary?: (charIndex: number) => void;
 };
 
 export type ListenOptions = {
@@ -22,10 +25,41 @@ export type ListenOptions = {
   onUnsupported?: () => void;
 };
 
+type SpeechRecognitionAlternativeLike = {
+  readonly transcript: string;
+  readonly confidence?: number;
+};
+
 type SpeechRecognitionResultLike = {
   readonly isFinal: boolean;
-  readonly 0: { readonly transcript: string };
+  readonly length?: number;
+  readonly [index: number]: SpeechRecognitionAlternativeLike | undefined;
 };
+
+export type HeardAlternative = {
+  transcript: string;
+  confidence: number;
+};
+
+function alternativesOf(
+  result: SpeechRecognitionResultLike | undefined,
+): HeardAlternative[] {
+  if (!result) return [];
+  const count =
+    typeof result.length === "number" && result.length > 0 ? result.length : 1;
+  const heard: HeardAlternative[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const alternative = result[index];
+    const transcript = alternative?.transcript?.trim() ?? "";
+    if (!transcript) continue;
+    const confidence =
+      typeof alternative?.confidence === "number" && Number.isFinite(alternative.confidence)
+        ? alternative.confidence
+        : 0;
+    heard.push({ transcript, confidence });
+  }
+  return heard;
+}
 
 type SpeechRecognitionEventLike = {
   readonly resultIndex: number;
@@ -62,6 +96,7 @@ declare global {
 
 let activeUtterance: SpeechSynthesisUtterance | null = null;
 let activeRecognition: SpeechRecognitionLike | null = null;
+let speakToken = 0;
 
 export function isSpeechSynthesisSupported(): boolean {
   return (
@@ -86,13 +121,17 @@ export function getSpeechRecognitionConstructor():
 }
 
 export function stopSpeaking(): void {
-  if (!isSpeechSynthesisSupported()) return;
-  window.speechSynthesis.cancel();
+  speakToken += 1;
   activeUtterance = null;
+  if (!isSpeechSynthesisSupported()) return;
+  const synth = window.speechSynthesis;
+  if (synth.speaking || synth.pending) synth.cancel();
 }
 
 /**
  * Speak text aloud. Resolves when utterance ends (or immediately if unsupported).
+ * Chrome drops an utterance that starts in the same turn as recognition ending
+ * or speechSynthesis.cancel(), so playback waits briefly and resumes if paused.
  */
 export function speak(text: string, options: SpeakOptions = {}): Promise<void> {
   const trimmed = text.trim();
@@ -104,15 +143,27 @@ export function speak(text: string, options: SpeakOptions = {}): Promise<void> {
   }
 
   stopSpeaking();
+  const token = speakToken;
 
   return new Promise((resolve) => {
+    let settled = false;
+    let startTimer = 0;
+    let watchdog = 0;
     const utterance = new SpeechSynthesisUtterance(trimmed);
     utterance.lang = options.lang ?? "en-US";
     utterance.rate = options.rate ?? 1;
     utterance.pitch = options.pitch ?? 1;
     utterance.volume = options.volume ?? 1;
+    utterance.onstart = () => options.onStart?.();
+    utterance.onboundary = (event) => {
+      if (typeof event.charIndex === "number") options.onBoundary?.(event.charIndex);
+    };
 
     const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(startTimer);
+      window.clearInterval(watchdog);
       if (activeUtterance === utterance) activeUtterance = null;
       resolve();
     };
@@ -120,16 +171,29 @@ export function speak(text: string, options: SpeakOptions = {}): Promise<void> {
     utterance.onend = finish;
     utterance.onerror = finish;
 
-    activeUtterance = utterance;
+    watchdog = window.setInterval(() => {
+      if (token !== speakToken) return;
+      try {
+        if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+      } catch {
+        // ignore
+      }
+    }, 250);
 
-    // Some browsers need a brief resume after cancel.
-    try {
-      window.speechSynthesis.resume();
-    } catch {
-      // ignore
-    }
-
-    window.speechSynthesis.speak(utterance);
+    startTimer = window.setTimeout(() => {
+      if (token !== speakToken) {
+        finish();
+        return;
+      }
+      try {
+        window.speechSynthesis.getVoices();
+        window.speechSynthesis.resume();
+      } catch {
+        // ignore
+      }
+      activeUtterance = utterance;
+      window.speechSynthesis.speak(utterance);
+    }, 80);
   });
 }
 
@@ -148,6 +212,64 @@ export function stopListening(): void {
     }
   }
   activeRecognition = null;
+}
+
+/**
+ * Hear short phrases while speech is playing. Reports only the latest result
+ * so an earlier echo of the email does not swallow a later "next".
+ * Returns a stop function.
+ */
+export function listenForLatestPiece(options: {
+  onPiece: (piece: string) => void;
+  /** Talk only. Research listening leaves this unset. */
+  preferTranscript?: (alternatives: readonly HeardAlternative[]) => string | null;
+}): () => void {
+  const Recognition = getSpeechRecognitionConstructor();
+  if (!Recognition) return () => undefined;
+  let stopped = false;
+  let current: SpeechRecognitionLike | null = null;
+
+  const start = () => {
+    if (stopped) return;
+    if (current && activeRecognition === current) stopListening();
+    const recognition = new Recognition();
+    current = recognition;
+    recognition.lang = "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = options.preferTranscript ? 5 : 1;
+    recognition.onresult = (event) => {
+      const latest = event.results[event.results.length - 1];
+      const preferred = options.preferTranscript?.(alternativesOf(latest));
+      const piece = (preferred ?? latest?.[0]?.transcript ?? "").trim();
+      if (piece) options.onPiece(piece);
+    };
+    recognition.onerror = (event) => {
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        stopped = true;
+      }
+    };
+    recognition.onend = () => {
+      if (stopped || current !== recognition) return;
+      window.setTimeout(() => {
+        if (stopped || current !== recognition) return;
+        start();
+      }, 300);
+    };
+    activeRecognition = recognition;
+    try {
+      recognition.start();
+    } catch {
+      // The next say() will try again.
+    }
+  };
+
+  start();
+  return () => {
+    stopped = true;
+    if (current && activeRecognition === current) stopListening();
+    current = null;
+  };
 }
 
 /**
@@ -246,6 +368,159 @@ export function listen(options: ListenOptions = {}): Promise<string> {
       });
     }
   });
+}
+
+export type PushToTalkController = {
+  finish: () => Promise<string>;
+  abort: () => void;
+};
+
+/**
+ * Conversational listening. Waits through a long thinking pause, then ends the
+ * turn after `endOfTurnMs` of silence. Does not require a wake word.
+ */
+export function listenUntilSilence(options: {
+  lang?: string;
+  endOfTurnMs: number;
+  thinkingPauseMs: number;
+  onInterim?: (transcript: string) => void;
+  onStart?: () => void;
+  /** Talk only. Research listening leaves this unset. */
+  preferTranscript?: (alternatives: readonly HeardAlternative[]) => string | null;
+}): Promise<string> {
+  const Recognition = getSpeechRecognitionConstructor();
+  if (!Recognition) {
+    return Promise.reject(new Error("unsupported"));
+  }
+  stopListening();
+  return new Promise((resolve, reject) => {
+    const recognition = new Recognition();
+    recognition.lang = options.lang ?? "en-US";
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = options.preferTranscript ? 5 : 1;
+    let settled = false;
+    let heard = "";
+    let silenceTimer: number | null = null;
+    const thinkingTimer = window.setTimeout(() => {
+      if (heard.trim()) return;
+      finish(() => reject(new Error("no-speech")));
+    }, options.thinkingPauseMs);
+
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(thinkingTimer);
+      if (silenceTimer) window.clearTimeout(silenceTimer);
+      activeRecognition = null;
+      try {
+        recognition.stop();
+      } catch {
+        // already stopped
+      }
+      fn();
+    };
+
+    const armSilence = () => {
+      if (silenceTimer) window.clearTimeout(silenceTimer);
+      silenceTimer = window.setTimeout(() => {
+        const transcript = heard.trim();
+        finish(() => {
+          if (transcript) resolve(transcript);
+          else reject(new Error("no-speech"));
+        });
+      }, options.endOfTurnMs);
+    };
+
+    recognition.onstart = () => options.onStart?.();
+    recognition.onresult = (event) => {
+      let next = "";
+      for (let i = 0; i < event.results.length; i += 1) {
+        const result = event.results[i];
+        if (options.preferTranscript) {
+          const piece = (
+            options.preferTranscript(alternativesOf(result)) ??
+            result?.[0]?.transcript ??
+            ""
+          ).trim();
+          if (!piece) continue;
+          next = next ? `${next} ${piece}` : piece;
+        } else {
+          next += result?.[0]?.transcript ?? "";
+        }
+      }
+      heard = next;
+      if (heard.trim()) {
+        window.clearTimeout(thinkingTimer);
+        options.onInterim?.(heard.trim());
+        armSilence();
+      }
+    };
+    recognition.onerror = (event) => finish(() => reject(new Error(event.error || "recognition-error")));
+    recognition.onend = () => {
+      if (settled) return;
+      const transcript = heard.trim();
+      finish(() => {
+        if (transcript) resolve(transcript);
+        else reject(new Error("no-speech"));
+      });
+    };
+    activeRecognition = recognition;
+    try {
+      recognition.start();
+    } catch (error) {
+      finish(() => reject(error instanceof Error ? error : new Error("start-failed")));
+    }
+  });
+}
+
+export function startPushToTalk(options: {
+  lang?: string;
+  onInterim?: (transcript: string) => void;
+  onStart?: () => void;
+} = {}): PushToTalkController {
+  const Recognition = getSpeechRecognitionConstructor();
+  if (!Recognition) {
+    return {
+      finish: () => Promise.reject(new Error("unsupported")),
+      abort: () => undefined,
+    };
+  }
+  stopListening();
+  const recognition = new Recognition();
+  recognition.lang = options.lang ?? "en-US";
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+  let heard = "";
+  recognition.onstart = () => options.onStart?.();
+  recognition.onresult = (event) => {
+    let next = "";
+    for (let i = 0; i < event.results.length; i += 1) {
+      next += event.results[i]?.[0]?.transcript ?? "";
+    }
+    heard = next;
+    if (heard.trim()) options.onInterim?.(heard.trim());
+  };
+  activeRecognition = recognition;
+  try {
+    recognition.start();
+  } catch {
+    // The finish call reports the failure to the caller.
+  }
+  return {
+    finish: () =>
+      new Promise((resolve, reject) => {
+        const transcript = heard.trim();
+        stopListening();
+        if (transcript) resolve(transcript);
+        else reject(new Error("no-speech"));
+      }),
+    abort: () => {
+      heard = "";
+      stopListening();
+    },
+  };
 }
 
 /**

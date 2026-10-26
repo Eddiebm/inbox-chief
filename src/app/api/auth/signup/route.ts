@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createMockSession, createSession, hashPassword } from "@/lib/auth";
+import { TERMS_VERSION } from "@/lib/legal";
 import { product } from "@/lib/product";
 
 const signupSchema = z.object({
   name: z.string().trim().min(2).max(120),
   email: z.string().trim().email().max(254),
   password: z.string().min(10).max(200),
+  acceptedTerms: z.literal(true, {
+    error: "You must accept the Terms of Service and Privacy Policy.",
+  }),
+  termsVersion: z.literal(TERMS_VERSION),
 });
 
 function slugify(input: string) {

@@ -10,6 +10,7 @@ import {
   stripePriceEnvKey,
 } from "@/lib/plans";
 import { isOperatorEmail } from "@/lib/operator";
+import { createStripeCheckoutSession } from "@/lib/billing/stripe-checkout-session";
 import { sameOriginRedirect } from "@/lib/security/redirects";
 
 export const runtime = "nodejs";
@@ -154,9 +155,6 @@ export async function POST(request: Request) {
   }
 
   try {
-    const Stripe = (await import("stripe")).default;
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
-
     let customerId: string | undefined;
     if (organizationId && process.env.DATABASE_URL) {
       const { getNodePrisma } = await import("@/lib/db-node");
@@ -169,13 +167,13 @@ export async function POST(request: Request) {
       customerId = sub?.stripeCustomerId ?? undefined;
     }
 
-    const session = await stripe.checkout.sessions.create({
+    const session = await createStripeCheckoutSession({
       mode: minutePack ? "payment" : "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      ...(customerId ? { customer: customerId } : {}),
-      ...(user?.email && !customerId ? { customer_email: user.email } : {}),
+      priceId,
+      successUrl,
+      cancelUrl,
+      customerId,
+      customerEmail: user?.email,
       metadata: {
         organizationId: organizationId ?? "",
         planKey: planKey ?? "",
@@ -183,16 +181,12 @@ export async function POST(request: Request) {
         minutePackKey: minutePack?.id ?? "",
         userId: user?.id ?? "",
       },
-      ...(minutePack
-        ? {}
+      subscriptionMetadata: minutePack
+        ? undefined
         : {
-            subscription_data: {
-              metadata: {
-                organizationId: organizationId ?? "",
-                planKey: planKey!,
-              },
-            },
-          }),
+            organizationId: organizationId ?? "",
+            planKey: planKey!,
+          },
     });
 
     return NextResponse.json({

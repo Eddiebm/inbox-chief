@@ -3,7 +3,7 @@ import { DraftsPanel } from "@/components/drafts/drafts-panel";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Drafts · ${product.name}`,
+  title: "Drafts",
 };
 
 export default function DraftsPage() {

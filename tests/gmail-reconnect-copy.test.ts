@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { shouldMeterCallInUsage } from "@/lib/billing/call-usage";
 import { gmailNeedsReconnectSpoken } from "@/lib/a11y/copy";
 import { mailboxNeedsReconnectSnapshot } from "@/lib/call-in/assistant";
 import { needsReconnectReason } from "@/lib/call-in/identity";
@@ -24,6 +25,18 @@ describe("invalid-token reconnect messaging", () => {
     expect(needsReconnectReason("needs_reconnect")).toBe(true);
     expect(needsReconnectReason("mailbox_token_missing")).toBe(true);
     expect(needsReconnectReason("rate_limited")).toBe(false);
+  });
+
+  it("keeps a real tenant id without metering reconnect calls", () => {
+    const snapshot = mailboxNeedsReconnectSnapshot("Eddie", "eddie@bannermanmenson.com", {
+      organizationId: "org_real",
+      workspaceId: "ws_real",
+      mailboxId: "mb_real",
+      matchedPhoneE164: "+14055106989",
+    });
+    expect(snapshot.organizationId).toBe("org_real");
+    expect(snapshot.matchedPhoneE164).toBe("+14055106989");
+    expect(shouldMeterCallInUsage(snapshot)).toBe(false);
   });
 
   it("names the mailbox on screen and stays jargon-free", () => {

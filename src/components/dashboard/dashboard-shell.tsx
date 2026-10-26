@@ -13,6 +13,8 @@ import { product } from "@/lib/product";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", exact: true },
+  { href: "/dashboard/talk", label: "Talk" },
+  { href: "/dashboard/agent", label: "Research and notes" },
   { href: "/dashboard/call-in", label: "Call in anytime" },
   { href: "/dashboard/inbox", label: "Inbox" },
   { href: "/dashboard/downloads", label: "Downloads" },
@@ -37,18 +39,20 @@ type DashboardShellProps = {
 
 export function DashboardShell({ children }: DashboardShellProps) {
   const pathname = usePathname();
+  const talkOnly = pathname === "/dashboard/talk" || pathname.startsWith("/dashboard/talk/");
 
   useEffect(() => {
     applyStoredA11yPreferences();
   }, []);
 
   useEffect(() => {
+    if (pathname === "/dashboard/talk" || pathname.startsWith("/dashboard/talk/")) return;
     const main = document.getElementById("main-content");
     main?.focus({ preventScroll: true });
   }, [pathname]);
 
   return (
-    <div className="dash-app">
+    <div className={talkOnly ? "dash-app dash-app--talk" : "dash-app"}>
       <OptInPageBeacon />
       <a href="#main-content" className="skip-link">
         Skip to main content

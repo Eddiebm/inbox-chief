@@ -11,7 +11,7 @@ import {
   speakHighTtsCostTip,
   voiceTierInfo,
 } from "@/lib/call-in/voice-tiers";
-import { buildCallInAssistantPayload } from "@/lib/call-in/vapi-tools";
+import { buildCallInAssistantPayload, vapiWebhookOrigin } from "@/lib/call-in/vapi-tools";
 
 describe("call-in voice tiers", () => {
   it("Patron defaults to standard; Pro to premium", () => {
@@ -75,6 +75,19 @@ describe("call-in voice tiers", () => {
     expect(speakStandardVoiceTip()).toMatch(/standard voice/i);
     expect(speakStandardVoiceTip()).toMatch(/Pro/i);
     expect(speakHighTtsCostTip()).toMatch(/Standard/i);
+  });
+
+  it("rewrites apex inboxchief.email to www so VAPI POSTs are not 308'd", () => {
+    expect(vapiWebhookOrigin("https://inboxchief.email")).toBe(
+      "https://www.inboxchief.email",
+    );
+    expect(vapiWebhookOrigin("https://inboxchief.email/")).toBe(
+      "https://www.inboxchief.email",
+    );
+    const payload = buildCallInAssistantPayload("https://inboxchief.email");
+    expect(payload.serverUrl).toBe(
+      "https://www.inboxchief.email/api/call-in/vapi/webhook",
+    );
   });
 
   it("assistant payload switches voice by tier and applies the default brisk rate", () => {

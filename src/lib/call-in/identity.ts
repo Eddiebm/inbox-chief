@@ -5,6 +5,7 @@ import {
   speakEmptyPrimaryInbox,
   unrecognizedCallerSnapshot,
   type CallInMailboxSnapshot,
+  type MailboxReconnectContext,
 } from "@/lib/call-in/assistant";
 import {
   buildReadableEmailsWithAttachments,
@@ -20,6 +21,20 @@ import { product } from "@/lib/product";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { upsertDerivedContacts } from "@/lib/contacts";
 import { redactIdentifier, redactPhone } from "@/lib/security/secrets";
+
+function reconnectTenant(input: {
+  organizationId: string;
+  workspaceId: string;
+  mailboxId?: string | null;
+  phoneE164?: string | null;
+}): MailboxReconnectContext {
+  return {
+    organizationId: input.organizationId,
+    workspaceId: input.workspaceId,
+    mailboxId: input.mailboxId ?? "unknown_mb",
+    matchedPhoneE164: input.phoneE164 ?? null,
+  };
+}
 
 export type ResolvedCallInIdentity = {
   snapshot: CallInMailboxSnapshot;
@@ -331,7 +346,16 @@ export async function resolveSnapshotForCaller(
 
     if (connectionStatus === "error") {
       return {
-        snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+        snapshot: mailboxNeedsReconnectSnapshot(
+          firstName,
+          mailboxEmail,
+          reconnectTenant({
+            organizationId: identity.organizationId,
+            workspaceId: identity.workspaceId,
+            mailboxId: mailbox?.id ?? identity.mailboxId,
+            phoneE164,
+          }),
+        ),
         matched: true,
         phoneE164,
         callInIdentityId: identity.id,
@@ -363,7 +387,16 @@ export async function resolveSnapshotForCaller(
           });
           if (!syncResult.ok && needsReconnectReason(syncResult.reason)) {
             return {
-              snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+              snapshot: mailboxNeedsReconnectSnapshot(
+                firstName,
+                mailboxEmail,
+                reconnectTenant({
+                  organizationId: identity.organizationId,
+                  workspaceId: identity.workspaceId,
+                  mailboxId: mailbox.id,
+                  phoneE164,
+                }),
+              ),
               matched: true,
               phoneE164,
               callInIdentityId: identity.id,
@@ -378,7 +411,16 @@ export async function resolveSnapshotForCaller(
           console.warn("[call-in] mailbox sync during resolve failed", syncErr);
           if (isGmailAuthFailure(syncErr)) {
             return {
-              snapshot: mailboxNeedsReconnectSnapshot(firstName, mailboxEmail),
+              snapshot: mailboxNeedsReconnectSnapshot(
+                firstName,
+                mailboxEmail,
+                reconnectTenant({
+                  organizationId: identity.organizationId,
+                  workspaceId: identity.workspaceId,
+                  mailboxId: mailbox.id,
+                  phoneE164,
+                }),
+              ),
               matched: true,
               phoneE164,
               callInIdentityId: identity.id,
@@ -577,7 +619,15 @@ export async function resolveSnapshotForUser(
     let connectionStatus = mapConnectionStatus(mailbox.connectionStatus);
 
     if (connectionStatus === "error") {
-      return mailboxNeedsReconnectSnapshot(firstName, mailbox.emailAddress);
+      return mailboxNeedsReconnectSnapshot(
+        firstName,
+        mailbox.emailAddress,
+        reconnectTenant({
+          organizationId: scope.organizationId,
+          workspaceId: scope.workspaceId,
+          mailboxId: mailbox.id,
+        }),
+      );
     }
 
     if (
@@ -603,6 +653,11 @@ export async function resolveSnapshotForUser(
             return mailboxNeedsReconnectSnapshot(
               firstName,
               mailbox.emailAddress,
+              reconnectTenant({
+                organizationId: scope.organizationId,
+                workspaceId: scope.workspaceId,
+                mailboxId: mailbox.id,
+              }),
             );
           }
           connectionStatus = syncResult.ok
@@ -614,6 +669,11 @@ export async function resolveSnapshotForUser(
             return mailboxNeedsReconnectSnapshot(
               firstName,
               mailbox.emailAddress,
+              reconnectTenant({
+                organizationId: scope.organizationId,
+                workspaceId: scope.workspaceId,
+                mailboxId: mailbox.id,
+              }),
             );
           }
           connectionStatus = mapConnectionStatus(mailbox.connectionStatus);

@@ -43,6 +43,11 @@ describe("billing routes bind the organization server-side", () => {
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "");
     vi.stubEnv("CALL_IN_PUBLIC_BASE_URL", "");
     vi.stubEnv("STRIPE_SECRET_KEY", "");
+    vi.stubEnv("STRIPE_PRICE_PATRON", "");
+    vi.stubEnv("STRIPE_PRICE_PRO", "");
+    vi.stubEnv("STRIPE_PRICE_MINUTES_30", "");
+    vi.stubEnv("STRIPE_PRICE_MINUTES_60", "");
+    vi.stubEnv("STRIPE_PRICE_MINUTES_120", "");
     mocks.getCurrentUser.mockResolvedValue({
       id: "user_1",
       email: "patron@example.com",

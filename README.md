@@ -89,6 +89,10 @@ Onboarding and the dashboard target WCAG-minded defaults: text scaling, high con
 
 With `MOCK_INTEGRATIONS=true` (default in `.env.example`), Gmail and similar integrations return stubs without calling external APIs. Billing routes return `{ ok: false, reason: "stripe_not_configured" }` until `STRIPE_SECRET_KEY` is set.
 
+## Research and notes
+
+Signed-in page: `/dashboard/agent`. Speech, saved sessions, publication search, and email-to-self live here. Phone call-in is separate. See [docs/RESEARCH_AGENT.md](docs/RESEARCH_AGENT.md).
+
 ## Call-in (VAPI)
 
 Primary phone path is **VAPI** (Twilio voice remains a fallback). Production dial-in: **+1 (405) 716-9240**. See [docs/call-in.md](docs/call-in.md).

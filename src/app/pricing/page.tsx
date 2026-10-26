@@ -6,13 +6,13 @@ import { formatPlanPrice, plans } from "@/lib/plans";
 import { product } from "@/lib/product";
 
 export const metadata: Metadata = {
-  title: `Pricing — ${product.name}`,
+  title: "Pricing",
   description: `${product.name} Patron and Pro plans with included call-in minutes plus prepaid minute packs — never unlimited, never surprise overage.`,
 };
 
 export default function PricingPage() {
   return (
-    <>
+    <div className="lp">
       <a href="#main" className="skip-link">
         Skip to main content
       </a>
@@ -58,6 +58,6 @@ export default function PricingPage() {
         </ul>
       </main>
       <SiteFooter />
-    </>
+    </div>
   );
 }
